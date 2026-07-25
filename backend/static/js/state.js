@@ -1,8 +1,17 @@
 // STITCH Global State Management
+let stitchToken, stitchTheme;
+try {
+  stitchToken = localStorage.getItem('stitch_token');
+  stitchTheme = localStorage.getItem('stitch_theme') || 'cyberpunk';
+} catch (e) {
+  stitchToken = null;
+  stitchTheme = 'cyberpunk';
+}
+
 const STITCH = {
   user: null,
-  token: localStorage.getItem('stitch_token'),
-  theme: localStorage.getItem('stitch_theme') || 'cyberpunk',
+  token: stitchToken,
+  theme: stitchTheme,
   currentRoute: '',
   currentEngagement: null,
   currentFinding: null,

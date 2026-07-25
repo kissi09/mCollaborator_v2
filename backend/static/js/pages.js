@@ -324,7 +324,7 @@ Describe the vulnerability...
 
 ### Evidence
 
-```code```"># SQL Injection in Login Module
+\`\`\`code\`\`\`"># SQL Injection in Login Module
 
 ## Description
 The authentication endpoint is vulnerable to SQL injection. User input from the username parameter is directly concatenated into the SQL query without proper sanitization.
