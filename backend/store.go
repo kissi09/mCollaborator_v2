@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Store struct {
@@ -17,8 +19,9 @@ type Store struct {
 	nodes       map[string]*Node
 	findings    map[string]*Finding
 	evidence    map[string]*Evidence
-	reports     map[string]*Report
-	auditLog    []*AuditLog
+	reports       map[string]*Report
+	reportRecords map[string]*ReportRecord
+	auditLog      []*AuditLog
 	sessions    map[string]*Session
 	comments    map[string]*Comment
 	activities  []*ActivityItem
@@ -33,8 +36,9 @@ func NewStore() *Store {
 		nodes:        make(map[string]*Node),
 		findings:     make(map[string]*Finding),
 		evidence:     make(map[string]*Evidence),
-		reports:      make(map[string]*Report),
-		auditLog:     make([]*AuditLog, 0),
+		reports:       make(map[string]*Report),
+		reportRecords: make(map[string]*ReportRecord),
+		auditLog:      make([]*AuditLog, 0),
 		sessions:     make(map[string]*Session),
 		comments:     make(map[string]*Comment),
 		activities:   make([]*ActivityItem, 0),
@@ -49,10 +53,12 @@ func (s *Store) seed() {
 	orgID := "org_001"
 	s.orgs[orgID] = &Org{ID: orgID, Name: "Cyberteq Falcon", Slug: "cyberteq-falcon", CreatedAt: now, UpdatedAt: now}
 
-	passwordHash := hashPassword("admin123")
+	bcryptHash, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+	passwordHash := string(bcryptHash)
+	legacyHash := hashPassword("admin123")
 	userID := "usr_001"
 	s.users[userID] = &User{
-		ID: userID, OrgID: orgID, Email: "admin@cyberteq.io", Name: "A. Jensen",
+		ID: userID, OrgID: orgID, Email: "admin@cyberteq.io", Name: "Admin User",
 		PasswordHash: passwordHash, Role: "admin", MFAEnabled: false,
 		Permissions: []string{"finding:write", "vault:read", "vault:write", "report:export", "admin:users", "engagements:write"},
 		CreatedAt: now,
@@ -62,7 +68,7 @@ func (s *Store) seed() {
 	userID2 := "usr_002"
 	s.users[userID2] = &User{
 		ID: userID2, OrgID: orgID, Email: "analyst@cyberteq.io", Name: "Sarah Jenkins",
-		PasswordHash: passwordHash, Role: "analyst", MFAEnabled: false,
+		PasswordHash: legacyHash, Role: "analyst", MFAEnabled: false,
 		Permissions: []string{"finding:write", "vault:read", "vault:write", "report:export"},
 		CreatedAt: now,
 	}
@@ -71,7 +77,7 @@ func (s *Store) seed() {
 	userID3 := "usr_003"
 	s.users[userID3] = &User{
 		ID: userID3, OrgID: orgID, Email: "client@acme.io", Name: "John Client",
-		PasswordHash: passwordHash, Role: "client", MFAEnabled: false,
+		PasswordHash: legacyHash, Role: "client", MFAEnabled: false,
 		Permissions: []string{"vault:read", "report:export"},
 		CreatedAt: now,
 	}
@@ -261,6 +267,9 @@ func (s *Store) Authenticate(email, password string) (*User, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid credentials")
 	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err == nil {
+		return user, nil
+	}
 	if user.PasswordHash != hashPassword(password) {
 		return nil, fmt.Errorf("invalid credentials")
 	}
@@ -434,6 +443,24 @@ func (s *Store) UpdateFinding(f *Finding) {
 	s.findings[f.ID] = f
 }
 
+func (s *Store) UpdateFindingWithVersion(id string, updateFn func(*Finding) error, expectedVersion int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.findings[id]
+	if !ok {
+		return fmt.Errorf("finding not found")
+	}
+	if f.Version != expectedVersion {
+		return fmt.Errorf("conflict: finding version %d does not match expected version %d", f.Version, expectedVersion)
+	}
+	if err := updateFn(f); err != nil {
+		return err
+	}
+	f.Version++
+	f.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	return nil
+}
+
 func (s *Store) DeleteFinding(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -450,6 +477,42 @@ func (s *Store) AssignFinding(findingID, userID string) error {
 	f.AssignedTo = userID
 	f.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return nil
+}
+
+func (s *Store) BulkCreateFindings(findings []*Finding) []*Finding {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, f := range findings {
+		f.ID = uuid.New().String()
+		f.Version = 1
+		f.CreatedAt = now
+		f.UpdatedAt = now
+		s.findings[f.ID] = f
+	}
+	// Return a copy with the generated IDs
+	result := make([]*Finding, len(findings))
+	copy(result, findings)
+	return result
+}
+
+func (s *Store) ListFindingsChanges(since string, engagementID string) []*Finding {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*Finding
+	sinceTime, _ := time.Parse(time.RFC3339, since)
+	if sinceTime.IsZero() {
+		return result
+	}
+	for _, f := range s.findings {
+		if f.EngagementID == engagementID {
+			updatedAt, err := time.Parse(time.RFC3339, f.UpdatedAt)
+			if err == nil && updatedAt.After(sinceTime) {
+				result = append(result, f)
+			}
+		}
+	}
+	return result
 }
 
 // Evidence operations
@@ -695,6 +758,76 @@ func (s *Store) ListAllFindingSeverities() map[string]int {
 	result := map[string]int{}
 	for _, f := range s.findings {
 		result[f.Severity]++
+	}
+	return result
+}
+
+// User management methods
+
+func (s *Store) CreateUser(user *User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.usersByEmail[user.Email]; exists {
+		return fmt.Errorf("user with email %s already exists", user.Email)
+	}
+	user.ID = uuid.New().String()
+	user.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	s.users[user.ID] = user
+	s.usersByEmail[user.Email] = user
+	return nil
+}
+
+func (s *Store) GetUserByEmail(email string) *User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.usersByEmail[email]
+}
+
+func (s *Store) ListAllUsers() []*User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*User
+	for _, u := range s.users {
+		result = append(result, u)
+	}
+	return result
+}
+
+func (s *Store) DeleteUser(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[id]
+	if !ok {
+		return fmt.Errorf("user not found")
+	}
+	delete(s.users, id)
+	delete(s.usersByEmail, user.Email)
+	return nil
+}
+
+// Report record methods
+
+func (s *Store) CreateReportRecord(rec *ReportRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec.ID = uuid.New().String()
+	rec.CreatedAt = time.Now()
+	s.reportRecords[rec.ID] = rec
+	return nil
+}
+
+func (s *Store) GetReportRecord(id string) *ReportRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.reportRecords[id]
+}
+
+func (s *Store) ListReportRecords() []*ReportRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*ReportRecord
+	for _, r := range s.reportRecords {
+		result = append(result, r)
 	}
 	return result
 }

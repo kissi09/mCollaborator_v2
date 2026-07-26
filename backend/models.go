@@ -11,15 +11,27 @@ type Org struct {
 }
 
 type User struct {
-	ID             string   `json:"id"`
-	OrgID          string   `json:"org_id"`
-	Email          string   `json:"email"`
-	Name           string   `json:"name"`
-	PasswordHash   string   `json:"-"`
-	Role           string   `json:"role"`
-	MFAEnabled     bool     `json:"mfa_enabled"`
-	Permissions    []string `json:"permissions"`
-	CreatedAt      string   `json:"created_at"`
+	ID             string    `json:"id"`
+	OrgID          string    `json:"org_id"`
+	Email          string    `json:"email"`
+	Name           string    `json:"name"`
+	Role           string    `json:"role"`
+	PasswordHash   string    `json:"-"`
+	MFAEnabled     bool      `json:"mfa_enabled"`
+	Permissions    []string  `json:"permissions"`
+	CreatedAt      string    `json:"created_at"`
+	PasswordExpiry time.Time `json:"password_expiry"`
+}
+
+type ReportRecord struct {
+	ID           string    `json:"id"`
+	EngagementID string    `json:"engagement_id"`
+	Title        string    `json:"title"`
+	Template     string    `json:"template"`
+	Format       string    `json:"format"`
+	FilePath     string    `json:"file_path"`
+	CreatedBy    string    `json:"created_by"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type Engagement struct {

@@ -42,6 +42,8 @@ func main() {
 			// User
 			r.Get("/users/me", HandleGetMe(store))
 			r.Get("/users", HandleListUsers(store))
+			r.Post("/users", requirePermission("admin:users", HandleCreateUser(store)))
+			r.Delete("/users/{id}", requirePermission("admin:users", HandleDeleteUser(store)))
 
 			// Engagements
 			r.Get("/engagements", HandleListEngagements(store))
@@ -53,6 +55,8 @@ func main() {
 			r.Post("/engagements/{id}/nodes", requirePermission("engagements:write", HandleCreateNode(store)))
 			r.Get("/engagements/{id}/findings", HandleListFindings(store))
 			r.Post("/engagements/{id}/findings", requirePermission("finding:write", HandleCreateFinding(store)))
+			r.Post("/engagements/{id}/findings/bulk", requirePermission("finding:write", HandleBulkCreateFindings(store)))
+			r.Get("/engagements/{id}/findings/changes", HandleFindingsChanges(store))
 
 			// Findings
 			r.Get("/findings/{id}", HandleGetFinding(store))
@@ -87,6 +91,13 @@ func main() {
 			r.Get("/analytics/recurring-cwes", HandleAnalyticsRecurringCWEs(store))
 			r.Get("/analytics/global-severity", HandleGlobalSeverity(store))
 		})
+
+		// Reports (with document generation)
+		r.Post("/reports/export", HandleExportReport(store))
+		r.Get("/reports/download/{type}/{name}", HandleDownloadReport)
+
+		// Threat Feed
+		r.Get("/threat-feed", HandleThreatFeed)
 	})
 
 	// Health check

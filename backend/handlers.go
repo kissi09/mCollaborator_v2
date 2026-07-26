@@ -9,6 +9,7 @@ import (
 	"time"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -70,6 +71,60 @@ func HandleListUsers(store *Store) http.HandlerFunc {
 		user := r.Context().Value(userContextKey).(*User)
 		users := store.ListUsers(user.OrgID)
 		writeJSON(w, http.StatusOK, ApiResponse{Data: users})
+	}
+}
+
+type createUserInput struct {
+	Email string `json:"email"`
+	Name  string `json:"name"`
+	Role  string `json:"role"`
+}
+
+func HandleCreateUser(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var input createUserInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "Invalid request body"}})
+			return
+		}
+		if input.Email == "" || input.Name == "" || input.Role == "" {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "email, name, and role are required"}})
+			return
+		}
+		if input.Role != "admin" && input.Role != "analyst" && input.Role != "user" {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "role must be admin, analyst, or user"}})
+			return
+		}
+		user := r.Context().Value(userContextKey).(*User)
+		// Hash password with bcrypt (default password: "changeme123")
+		hash, _ := bcrypt.GenerateFromPassword([]byte("changeme123"), bcrypt.DefaultCost)
+		newUser := &User{
+			ID:             uuid.New().String(),
+			OrgID:          user.OrgID,
+			Email:          input.Email,
+			Name:           input.Name,
+			Role:           input.Role,
+			PasswordHash:   string(hash),
+			Permissions:    []string{},
+			CreatedAt:      time.Now().Format(time.RFC3339),
+			PasswordExpiry: time.Now().AddDate(0, 3, 0),
+		}
+		if err := store.CreateUser(newUser); err != nil {
+			writeJSON(w, http.StatusConflict, ApiResponse{Error: &ApiError{Code: "CONFLICT", Message: err.Error()}})
+			return
+		}
+		writeJSON(w, http.StatusCreated, ApiResponse{Data: newUser})
+	}
+}
+
+func HandleDeleteUser(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		if err := store.DeleteUser(id); err != nil {
+			writeJSON(w, http.StatusNotFound, ApiResponse{Error: &ApiError{Code: "NOT_FOUND", Message: "User not found"}})
+			return
+		}
+		writeJSON(w, http.StatusOK, ApiResponse{Data: "User deleted"})
 	}
 }
 
@@ -309,6 +364,58 @@ func HandleUpdateFindingStatus(store *Store) http.HandlerFunc {
 	}
 }
 
+func HandleBulkCreateFindings(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := r.Context().Value(userContextKey).(*User)
+		engID := chi.URLParam(r, "id")
+		var input struct {
+			Findings []createFindingInput `json:"findings"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_REQUEST", Message: "Invalid request body"}})
+			return
+		}
+		if len(input.Findings) == 0 {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_REQUEST", Message: "No findings provided"}})
+			return
+		}
+		findings := make([]*Finding, 0, len(input.Findings))
+		for _, inp := range input.Findings {
+			f := &Finding{
+				EngagementID: engID, NodeID: inp.NodeID, Title: inp.Title,
+				CVE: inp.CVE, CWEs: inp.CWEs, MitreAttackIDs: inp.MitreAttackIDs,
+				Severity: inp.Severity, CVSSVector: inp.CVSSVector, CVSSScore: inp.CVSSScore,
+				Status: inp.Status, Description: inp.Description, POC: inp.POC,
+				Remediation: inp.Remediation, Impact: inp.Impact, Likelihood: inp.Likelihood,
+				AssignedTo: inp.AssignedTo, CreatedBy: user.ID,
+			}
+			findings = append(findings, f)
+		}
+		created := store.BulkCreateFindings(findings)
+		for _, f := range created {
+			store.AddActivity(&ActivityItem{OrgID: user.OrgID, UserID: user.ID, UserName: user.Name, Action: "added_finding", Detail: fmt.Sprintf("Bulk added %s finding: %s", f.Severity, f.Title), EngagementID: engID})
+		}
+		store.AddAuditLog(&AuditLog{OrgID: user.OrgID, ActorID: user.ID, Action: "finding.bulk_create", Resource: "finding", ResourceID: engID, IPAddress: r.RemoteAddr, Diff: fmt.Sprintf("created %d findings", len(created))})
+		writeJSON(w, http.StatusCreated, ApiResponse{Data: created})
+	}
+}
+
+func HandleFindingsChanges(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		engID := chi.URLParam(r, "id")
+		since := r.URL.Query().Get("since")
+		if since == "" {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_REQUEST", Message: "since query param required (RFC3339)"}})
+			return
+		}
+		changes := store.ListFindingsChanges(since, engID)
+		writeJSON(w, http.StatusOK, ApiResponse{Data: map[string]interface{}{
+			"changes":  changes,
+			"checked_at": time.Now().UTC().Format(time.RFC3339),
+		}})
+	}
+}
+
 func HandleAssignFinding(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := r.Context().Value(userContextKey).(*User)
@@ -439,23 +546,7 @@ func HandleGetReport(store *Store) http.HandlerFunc {
 	}
 }
 
-func HandleExportReport(store *Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := r.Context().Value(userContextKey).(*User)
-		id := chi.URLParam(r, "id")
-		report, err := store.GetReport(id)
-		if err != nil {
-			writeJSON(w, http.StatusNotFound, ApiResponse{Error: &ApiError{Code: "NOT_FOUND", Message: "Report not found"}})
-			return
-		}
-		report.Status = "exported"
-		store.UpdateReport(report)
-		store.AddAuditLog(&AuditLog{OrgID: user.OrgID, ActorID: user.ID, Action: "report.export", Resource: "report", ResourceID: id, IPAddress: r.RemoteAddr})
-		writeJSON(w, http.StatusOK, ApiResponse{Data: map[string]string{
-			"job_id": uuid.New().String(), "status": "completed", "download_url": fmt.Sprintf("/api/v1/reports/%s/download", id),
-		}})
-	}
-}
+
 
 func HandleReportDownload(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

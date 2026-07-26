@@ -16,12 +16,12 @@ function renderLogin() {
       <p>Sign in to your workspace.</p>
       <form onsubmit="handleLogin(event)">
         <label for="email">Email</label>
-        <input type="email" id="email" class="input" value="admin@cyberteq.io" placeholder="you@company.io" required>
+        <input type="email" id="email" class="input" value="username@cyberteq.io" placeholder="username@cyberteq.io" required>
         <label for="password">Password</label>
         <input type="password" id="password" class="input" value="admin123" placeholder="••••••••" required>
         <button type="submit" class="btn btn-primary">Sign In</button>
         <p style="margin-top:16px;font-size:12px;color:var(--muted);text-align:center;">
-          Demo: admin@cyberteq.io / admin123
+          Demo: username@cyberteq.io / admin123
         </p>
       </form>
     </div>
@@ -32,8 +32,17 @@ async function handleLogin(e) {
   e.preventDefault();
   const email = document.getElementById('email').value;
   const password = document.getElementById('password').value;
+  if (isXSSAttempt(email) || isXSSAttempt(password)) {
+    showToast('Invalid input detected', 'error');
+    return;
+  }
+  if (!validateCyberteqEmail(email)) {
+    showToast('Only @cyberteq.io email addresses are allowed', 'error');
+    return;
+  }
+  const safeEmail = sanitizeInput(email);
   try {
-    const res = await api.post('/auth/login', { email, password });
+    const res = await api.post('/auth/login', { email: safeEmail, password });
     STITCH.saveToken(res.data.token);
     STITCH.user = res.data.user;
     window.location.hash = '#/dashboard';
@@ -50,7 +59,7 @@ function renderSidebar(type, currentPath) {
     return `
       <div class="sidebar">
         <div style="padding:8px 0;display:flex;justify-content:center;">
-          <img src="/images/cyberteq-logo.png" alt="CT" style="width:36px;height:auto;opacity:0.7;">
+          <img src="/images/cyberteq-logo.png" alt="C" style="height:28px;object-fit:cover;object-position:left;clip-path:inset(0 60% 0 0);">
         </div>
         <div class="nav-item" onclick="STITCH.navigate('#/command/dashboard')" title="Global Threat Dashboard">
           <span class="${isActive('/command/dashboard')}" style="font-size:20px;">⬡</span>
@@ -63,6 +72,12 @@ function renderSidebar(type, currentPath) {
         </div>
         <div class="nav-item ${isActive('/command/report-builder')}" onclick="STITCH.navigate('#/command/report-builder')" title="Report Builder">
           <span style="font-size:20px;">▣</span>
+        </div>
+        <div class="nav-item ${isActive('/command/threat-feed')}" onclick="STITCH.navigate('#/command/threat-feed')" title="Threat Feed">
+          <span style="font-size:20px;">⚠</span>
+        </div>
+        <div class="nav-item ${isActive('/admin/users')}" onclick="STITCH.navigate('#/admin/users')" title="User Management">
+          <span style="font-size:20px;">👥</span>
         </div>
         <div style="flex:1;"></div>
         <div class="nav-item ${isActive('/dashboard')}" onclick="STITCH.navigate('#/dashboard')" title="Ledger Dashboard">
@@ -79,7 +94,7 @@ function renderSidebar(type, currentPath) {
     return `
       <div class="sidebar">
         <div class="flex items-center gap-3 px-4 mb-6">
-          <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:28px;max-width:80px;">
+          <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:24px;object-fit:contain;">
           <div>
             <div class="font-display font-bold" style="color:#fff;">Cyberteq</div>
             <div style="font-size:11px;color:#9CA3AF;font-family:var(--font-mono);">mCollaborator</div>
@@ -100,6 +115,9 @@ function renderSidebar(type, currentPath) {
         <div class="nav-item ${isActive('/reports')}" onclick="STITCH.navigate('#/reports')">
           <span>📄</span> Report Generator
         </div>
+        <div class="nav-item ${isActive('/command/threat-feed')}" onclick="STITCH.navigate('#/command/threat-feed')">
+          <span>⚠</span> Threat Feed
+        </div>
         <div style="flex:1;"></div>
         <div class="nav-item" style="font-size:11px;color:#6B7280;">
           <span style="font-size:11px;">👤</span> ${STITCH.user?.name || 'User'}
@@ -112,7 +130,7 @@ function renderSidebar(type, currentPath) {
   return `
     <div class="sidebar">
       <div class="flex items-center gap-3 px-3 mb-6">
-          <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:28px;max-width:80px;">
+          <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:24px;object-fit:contain;">
           <div>
           <div class="font-display font-bold">Falcon Insight</div>
           <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">mCollaborator</div>
@@ -229,6 +247,7 @@ function renderProjectLedger() {
       <div class="pane pane-center p-4">
         <div class="flex items-center justify-between mb-4">
           <h4 class="font-display font-bold">Findings</h4>
+          <button class="btn btn-sm btn-ghost" onclick="showBulkImportModal()">+ Bulk Import</button>
           <button class="btn btn-primary" onclick="STITCH.navigate('#/finding-editor')">+ New Finding</button>
         </div>
         <div id="project-findings">
@@ -309,6 +328,9 @@ async function afterRenderProjectLedger() {
       if (el) el.innerHTML = '<p class="text-muted text-sm">Failed to load.</p>';
     });
   }
+  const path = STITCH.currentRoute;
+  const match = path.match(/\/ledger\/([^\/]+)/);
+  if (match) startFindingsPolling(match[1]);
 }
 
 // -------- mCollaborator: FINDING EDITOR --------
@@ -371,6 +393,17 @@ Response: HTTP 200 with admin session token</textarea>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
                 <option value="info">Info</option>
+              </select>
+            </div>
+            <div style="grid-column:1/3;">
+              <label style="font-size:11px;color:var(--muted);font-weight:600;">Category</label>
+              <select class="input w-full" id="finding-category" style="padding:4px 8px;">
+                <option value="external">External Penetration Test</option>
+                <option value="internal">Internal Penetration Test</option>
+                <option value="web">Web Application Penetration Test</option>
+                <option value="code_review">Code Review</option>
+                <option value="architecture">Network Architecture Review</option>
+                <option value="active_directory">Active Directory Assessment</option>
               </select>
             </div>
             <div>
@@ -474,84 +507,267 @@ async function handleUpload(input) {
   STITCH.render();
 }
 
-// -------- LEDGER: REPORT GENERATOR --------
+// -------- LEDGER: REPORT GENERATOR WIZARD --------
+let reportWizardState = { step: 1, companyName: '', logo: '', projectName: '', sections: [], findings: [], format: 'docx' };
+
 function renderReportGenerator() {
+  reportWizardState = { step: 1, companyName: '', logo: '', projectName: '', sections: [], findings: [], format: 'docx' };
   return `
-    <div class="flex" style="height:calc(100vh - 64px - 48px);margin:-24px;">
-      <div style="width:380px;border-right:1px solid var(--border);padding:24px;overflow-y:auto;">
-        <h3 class="font-display font-bold mb-6">Report Configuration</h3>
-        <div class="mb-6">
-          <label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">Template</label>
-          <select class="input w-full" id="report-template">
-            <option value="executive">Executive Summary</option>
-            <option value="technical" selected>Full Technical</option>
-            <option value="compliance">Compliance (PCI-DSS)</option>
-          </select>
+    <div style="max-width:900px;margin:0 auto;">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="font-display font-bold" style="font-size:22px;">Report Generation Wizard</h2>
+        <div class="flex items-center gap-2">
+          ${[1,2,3,4].map(s => `
+            <div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;
+              background:${s === 1 ? 'var(--primary)' : 'var(--surface-hover)'};color:${s === 1 ? 'var(--bg)' : 'var(--muted)'};"
+              id="wizard-step-${s}">${s}</div>
+            ${s < 4 ? '<div style="width:24px;height:2px;background:var(--border);"></div>' : ''}
+          `).join('')}
         </div>
-        <div class="mb-6">
-          <h4 class="font-semibold mb-4">Content Inclusion</h4>
-          <div class="flex items-center justify-between mb-4">
-            <span style="font-size:13px;">Include Low Severity</span>
-            <label class="toggle"><input type="checkbox" checked><span class="slider"></span></label>
-          </div>
-          <div class="flex items-center justify-between mb-4">
-            <span style="font-size:13px;">Include Screenshots</span>
-            <label class="toggle"><input type="checkbox" checked><span class="slider"></span></label>
-          </div>
-          <div class="flex items-center justify-between">
-            <span style="font-size:13px;">Append Scope Tree</span>
-            <label class="toggle"><input type="checkbox"><span class="slider"></span></label>
-          </div>
-        </div>
-        <div class="text-xs text-muted mb-4 font-mono">Est. Pages: 42</div>
-        <button class="btn btn-primary w-full" onclick="generateReport()">Download PDF</button>
       </div>
-      <div class="flex-1 p-8 overflow-y-auto">
-        <div style="max-width:850px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);min-height:1100px;">
-          <div style="height:8px;background:var(--primary);"></div>
-          <div style="padding:48px;">
-            <div style="display:flex;justify-content:space-between;border-bottom:2px solid var(--text);padding-bottom:24px;margin-bottom:48px;">
-              <div>
-                <h1 class="font-display font-bold" style="font-size:28px;">Security Assessment Report</h1>
-                <div class="font-mono text-sm text-muted">Project: ${STITCH.currentEngagement?.name || 'FAL-2025-001'}</div>
-              </div>
-              <div style="text-align:right;">
-                <div class="font-bold">Cyberteq Falcon</div>
-                <div class="text-sm text-muted">Confidential</div>
-              </div>
-            </div>
-            <h2 class="font-display font-bold" style="font-size:22px;margin-bottom:24px;">1. Executive Summary</h2>
-            <p style="margin-bottom:16px;line-height:1.7;">Between October 1st and October 31st, 2025, Cyberteq Falcon conducted a comprehensive security assessment of the target infrastructure. The primary objective was to identify vulnerabilities that could compromise the confidentiality, integrity, or availability of critical systems.</p>
-            <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin:32px 0;">
-              <table class="table">
-                <thead><tr><th>Severity</th><th>Count</th><th>Status</th></tr></thead>
-                <tbody>
-                  <tr><td style="color:var(--critical);font-weight:700;">Critical</td><td>2</td><td>Open</td></tr>
-                  <tr><td style="color:var(--warning);font-weight:700;">High</td><td>5</td><td>Open</td></tr>
-                  <tr><td>Medium</td><td>8</td><td>In Progress</td></tr>
-                  <tr><td style="color:#22C55E;">Low</td><td>12</td><td>Not Started</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+      <div class="card" style="padding:32px;" id="report-wizard-content">
+        ${renderReportStep1()}
       </div>
     </div>
   `;
 }
 
-async function generateReport() {
-  showToast('Compiling document...', 'info');
-  try {
-    await api.post('/reports', {
-      engagement_id: STITCH.currentEngagement?.id || 'eng_001',
-      title: STITCH.currentEngagement?.name + ' - Report',
-      template: document.getElementById('report-template')?.value || 'technical'
-    });
-    showToast('Report generated successfully!', 'success');
-  } catch (e) {
-    showToast('Report generation failed', 'error');
+function renderReportStep1() {
+  return `
+    <h3 class="font-display font-bold mb-6" style="font-size:18px;">Step 1: Company Info</h3>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Company Name</label>
+      <input class="input w-full" id="wizard-company-name" placeholder="e.g. Acme Corp" value="${reportWizardState.companyName}" oninput="reportWizardState.companyName=this.value">
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Company Logo</label>
+      <div class="flex items-center gap-4">
+        <div style="width:80px;height:80px;border:2px dashed var(--border);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;overflow:hidden;" id="wizard-logo-preview">
+          ${reportWizardState.logo ? `<img src="${reportWizardState.logo}" style="width:100%;height:100%;object-fit:contain;">` : '<span style="color:var(--muted);font-size:24px;">+</span>'}
+        </div>
+        <div>
+          <button class="btn btn-secondary" onclick="document.getElementById('wizard-logo-input').click()">Upload Logo</button>
+          <input type="file" id="wizard-logo-input" accept="image/*" style="display:none;" onchange="uploadReportLogo(this)">
+          <div class="text-xs text-muted mt-2">PNG, JPG up to 2MB</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Project Name</label>
+      <input class="input w-full" id="wizard-project-name" placeholder="e.g. FAL-2025-001" value="${reportWizardState.projectName || STITCH.currentEngagement?.name || ''}" oninput="reportWizardState.projectName=this.value">
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:24px;">
+      <button class="btn btn-primary" onclick="reportWizardNext()">Next Step →</button>
+    </div>
+  `;
+}
+
+function renderReportStep2() {
+  const sectionOptions = [
+    { id: 'ept', label: 'External Penetration Test (EPT)' },
+    { id: 'wpt', label: 'Web Application Penetration Test (WPT)' },
+    { id: 'nar', label: 'Network Architecture Review (NAR)' },
+    { id: 'codereview', label: 'Code Review' },
+    { id: 'ad', label: 'Active Directory Assessment' }
+  ];
+  return `
+    <h3 class="font-display font-bold mb-6" style="font-size:18px;">Step 2: Report Sections</h3>
+    <p class="text-sm text-muted mb-6">Select which sections to include in the report.</p>
+    <div class="flex flex-col gap-3">
+      ${sectionOptions.map(s => `
+        <label class="flex items-center gap-3 p-4 card" style="cursor:pointer;${reportWizardState.sections.includes(s.id) ? 'border-color:var(--primary);' : ''}"
+               onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='${reportWizardState.sections.includes(s.id) ? 'var(--primary)' : 'var(--border)'}'">
+          <input type="checkbox" value="${s.id}" ${reportWizardState.sections.includes(s.id) ? 'checked' : ''}
+                 onchange="if(this.checked){reportWizardState.sections.push('${s.id}')}else{reportWizardState.sections=reportWizardState.sections.filter(x=>x!=='${s.id}')}">
+          <span style="font-size:14px;">${s.label}</span>
+        </label>
+      `).join('')}
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:24px;">
+      <button class="btn btn-secondary" onclick="reportWizardBack()">← Back</button>
+      <button class="btn btn-primary" onclick="reportWizardNext()">Next Step →</button>
+    </div>
+  `;
+}
+
+function renderReportStep3() {
+  return `
+    <h3 class="font-display font-bold mb-6" style="font-size:18px;">Step 3: Select Findings</h3>
+    <p class="text-sm text-muted mb-4">Choose which findings to include in the report.</p>
+    <div id="wizard-findings-list" style="max-height:400px;overflow-y:auto;">
+      <div class="text-muted text-sm p-4">Loading findings...</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:24px;">
+      <button class="btn btn-secondary" onclick="reportWizardBack()">← Back</button>
+      <button class="btn btn-primary" onclick="reportWizardNext()">Next Step →</button>
+    </div>
+  `;
+}
+
+function renderReportStep4() {
+  return `
+    <h3 class="font-display font-bold mb-6" style="font-size:18px;">Step 4: Generate Report</h3>
+    <div class="flex flex-col gap-4 mb-6">
+      <div class="card p-4">
+        <h4 class="font-semibold mb-2">Report Summary</h4>
+        <div style="font-size:13px;color:var(--text-muted);">
+          <div class="mb-1"><strong>Company:</strong> ${reportWizardState.companyName || 'Not specified'}</div>
+          <div class="mb-1"><strong>Project:</strong> ${reportWizardState.projectName || 'Not specified'}</div>
+          <div class="mb-1"><strong>Sections:</strong> ${reportWizardState.sections.length || 0} selected</div>
+          <div><strong>Findings:</strong> ${reportWizardState.findings.length || 0} included</div>
+        </div>
+      </div>
+      <div class="card p-4">
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">Export Format</label>
+        <div class="flex gap-3">
+          <label class="flex items-center gap-2 p-3 card" style="cursor:pointer;flex:1;${reportWizardState.format === 'docx' ? 'border-color:var(--primary);' : ''}">
+            <input type="radio" name="report-format" value="docx" ${reportWizardState.format === 'docx' ? 'checked' : ''} onchange="reportWizardState.format='docx'">
+            <span style="font-size:14px;">📄 DOCX</span>
+          </label>
+          <label class="flex items-center gap-2 p-3 card" style="cursor:pointer;flex:1;${reportWizardState.format === 'pdf' ? 'border-color:var(--primary);' : ''}">
+            <input type="radio" name="report-format" value="pdf" ${reportWizardState.format === 'pdf' ? 'checked' : ''} onchange="reportWizardState.format='pdf'">
+            <span style="font-size:14px;">📕 PDF</span>
+          </label>
+        </div>
+      </div>
+      <div id="report-preview" style="border:1px solid var(--border);border-radius:var(--radius);padding:32px;background:var(--bg);min-height:200px;">
+        <div style="text-align:center;color:var(--muted);padding:40px 0;">
+          <div style="font-size:32px;margin-bottom:8px;">📋</div>
+          <p>Click "Generate Report" to create your document.</p>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:24px;">
+      <button class="btn btn-secondary" onclick="reportWizardBack()">← Back</button>
+      <button class="btn btn-primary" onclick="generateReportDocument()">⚡ Generate Report</button>
+    </div>
+  `;
+}
+
+function reportWizardNext() {
+  if (reportWizardState.step === 1) {
+    reportWizardState.companyName = document.getElementById('wizard-company-name')?.value || reportWizardState.companyName;
+    reportWizardState.projectName = document.getElementById('wizard-project-name')?.value || reportWizardState.projectName;
   }
+  if (reportWizardState.step < 4) {
+    reportWizardState.step++;
+  }
+  renderReportWizardStep();
+}
+
+function reportWizardBack() {
+  if (reportWizardState.step > 1) {
+    reportWizardState.step--;
+  }
+  renderReportWizardStep();
+}
+
+function renderReportWizardStep() {
+  const container = document.getElementById('report-wizard-content');
+  if (!container) return;
+  const stepFns = { 1: renderReportStep1, 2: renderReportStep2, 3: renderReportStep3, 4: renderReportStep4 };
+  container.innerHTML = stepFns[reportWizardState.step]();
+  [1,2,3,4].forEach(s => {
+    const el = document.getElementById(`wizard-step-${s}`);
+    if (el) {
+      el.style.background = s === reportWizardState.step ? 'var(--primary)' : s < reportWizardState.step ? 'var(--primary)' : 'var(--surface-hover)';
+      el.style.color = s <= reportWizardState.step ? 'var(--bg)' : 'var(--muted)';
+    }
+  });
+  if (reportWizardState.step === 3) loadWizardFindings();
+}
+
+function loadWizardFindings() {
+  const engId = STITCH.currentEngagement?.id || 'eng_001';
+  const container = document.getElementById('wizard-findings-list');
+  if (!container) return;
+  api.get(`/engagements/${engId}/findings`).then(res => {
+    const findings = res.data || [];
+    if (findings.length === 0) {
+      container.innerHTML = '<p class="text-muted text-sm p-4">No findings available.</p>';
+      return;
+    }
+    const grouped = {};
+    findings.forEach(f => {
+      const cat = f.severity || 'other';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(f);
+    });
+    container.innerHTML = Object.entries(grouped).map(([cat, items]) => `
+      <div class="mb-4">
+        <div class="text-xs font-mono text-muted uppercase mb-2" style="padding:4px 0;border-bottom:1px solid var(--border);">${cat} (${items.length})</div>
+        ${items.map(f => `
+          <label class="flex items-center gap-3 p-3" style="cursor:pointer;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background=''">
+            <input type="checkbox" value="${f.id}" ${reportWizardState.findings.includes(f.id) ? 'checked' : ''}
+                   onchange="if(this.checked){reportWizardState.findings.push('${f.id}')}else{reportWizardState.findings=reportWizardState.findings.filter(x=>x!=='${f.id}')}">
+            <div class="flex-1">
+              <div class="font-semibold" style="font-size:13px;">${f.title}</div>
+              <div class="text-xs text-muted font-mono">CVSS: ${f.cvss_score || 'N/A'} ${f.cve ? '| ' + f.cve : ''}</div>
+            </div>
+          </label>
+        `).join('')}
+      </div>
+    `).join('');
+  }).catch(() => {
+    container.innerHTML = '<p class="text-muted text-sm p-4">Failed to load findings.</p>';
+  });
+}
+
+function uploadReportLogo(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) {
+    showToast('Logo too large (max 2MB)', 'error');
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    reportWizardState.logo = e.target.result;
+    const preview = document.getElementById('wizard-logo-preview');
+    if (preview) preview.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:contain;">`;
+    showToast('Logo uploaded', 'success');
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+async function generateReportDocument() {
+  showToast('Compiling report document...', 'info');
+  try {
+    const res = await api.post('/reports/export', {
+      engagement_id: STITCH.currentEngagement?.id || 'eng_001',
+      company_name: reportWizardState.companyName,
+      project_name: reportWizardState.projectName,
+      logo: reportWizardState.logo,
+      sections: reportWizardState.sections,
+      finding_ids: reportWizardState.findings,
+      format: reportWizardState.format
+    });
+    const filename = res.data?.filename;
+    if (filename) {
+      downloadReport(filename);
+    } else {
+      showToast('Report generated', 'success');
+    }
+    const preview = document.getElementById('report-preview');
+    if (preview) {
+      preview.innerHTML = `
+        <div style="text-align:center;padding:40px 0;">
+          <div style="font-size:32px;margin-bottom:8px;">✅</div>
+          <p class="font-semibold">Report generated successfully!</p>
+          <button class="btn btn-primary mt-4" onclick="downloadReport('${filename || ''}')">⬇ Download Report</button>
+        </div>
+      `;
+    }
+  } catch (e) {
+    showToast('Report generation failed: ' + (e.message || 'Unknown error'), 'error');
+  }
+}
+
+function downloadReport(filename) {
+  if (!filename) return;
+  window.open(`/api/v1/reports/download/${filename}`, '_blank');
 }
 
 // -------- INSIGHT: COMMAND DASHBOARD --------
@@ -1171,6 +1387,217 @@ function onDragStart(event, findingId) {
   if (dz) dz.classList.remove('hidden');
 }
 
+// -------- COMMAND CENTER: GLOBAL THREAT FEED --------
+function renderGlobalThreatFeed() {
+  return `
+    <div style="display:flex;height:calc(100vh - 64px - 48px);margin:-24px;">
+      <div style="width:220px;border-right:1px solid var(--border);padding:16px;overflow-y:auto;">
+        <h4 class="font-display font-bold text-sm mb-4">Filters</h4>
+        <div class="mb-4">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">Severity</label>
+          <label class="flex items-center gap-2 text-sm mb-2"><input type="checkbox" id="tf-sev-critical" checked> <span style="color:var(--critical);">Critical</span></label>
+          <label class="flex items-center gap-2 text-sm mb-2"><input type="checkbox" id="tf-sev-high" checked> <span style="color:var(--warning);">High</span></label>
+          <label class="flex items-center gap-2 text-sm mb-2"><input type="checkbox" id="tf-sev-medium" checked> Medium</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="tf-sev-low"> Low</label>
+        </div>
+        <div class="mb-4">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">Source</label>
+          <select class="input w-full" id="tf-source-filter" style="padding:4px 8px;font-size:12px;" onchange="filterThreatFeed()">
+            <option value="">All Sources</option>
+            <option value="cve">CVE/NVD</option>
+            <option value="osint">OSINT</option>
+            <option value="internal">Internal</option>
+            <option value="ti-feed">TI Feed</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary w-full" style="font-size:12px;" onclick="afterRenderGlobalThreatFeed()">↻ Refresh</button>
+      </div>
+      <div style="flex-1;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surface);">
+          <div class="flex items-center gap-3">
+            <h3 class="font-display font-bold" style="font-size:16px;">Live Threat Intelligence</h3>
+            <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:var(--font-mono);color:var(--primary);">
+              <span style="width:6px;height:6px;border-radius:50%;background:var(--primary);animation:pulseCritical 2s infinite;"></span>
+              LIVE
+            </span>
+          </div>
+          <div class="text-xs text-muted font-mono" id="tf-refresh-indicator">Auto-refresh: 60s</div>
+        </div>
+        <div style="flex:1;overflow:auto;">
+          <table class="table" id="threat-feed-table">
+            <thead style="position:sticky;top:0;z-index:10;">
+              <tr>
+                <th style="width:90px;">Severity</th>
+                <th>Title</th>
+                <th style="width:120px;">Source</th>
+                <th style="width:130px;">Category</th>
+                <th style="width:130px;">Published</th>
+                <th style="width:80px;"></th>
+              </tr>
+            </thead>
+            <tbody id="threat-feed-body">
+              <tr><td colspan="6" class="text-center text-muted">Loading threat intelligence...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+let threatFeedInterval = null;
+
+async function afterRenderGlobalThreatFeed() {
+  if (threatFeedInterval) clearInterval(threatFeedInterval);
+
+  async function fetchThreats() {
+    try {
+      const res = await api.get('/threat-feed');
+      const threats = res.data || [];
+      const tbody = document.getElementById('threat-feed-body');
+      if (!tbody) return;
+
+      const sevCritical = document.getElementById('tf-sev-critical')?.checked;
+      const sevHigh = document.getElementById('tf-sev-high')?.checked;
+      const sevMedium = document.getElementById('tf-sev-medium')?.checked;
+      const sevLow = document.getElementById('tf-sev-low')?.checked;
+      const sourceFilter = document.getElementById('tf-source-filter')?.value || '';
+
+      const filtered = threats.filter(t => {
+        const s = (t.severity || '').toLowerCase();
+        if (s === 'critical' && !sevCritical) return false;
+        if (s === 'high' && !sevHigh) return false;
+        if (s === 'medium' && !sevMedium) return false;
+        if (s === 'low' && !sevLow) return false;
+        if (sourceFilter && (t.source || '').toLowerCase() !== sourceFilter) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No threats match current filters.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(t => `
+        <tr style="${t.severity === 'critical' ? 'animation: pulseCritical 2s infinite;' : ''}">
+          <td><span class="badge-severity ${t.severity}" style="display:block;text-align:center;">[${(t.severity || 'N/A').toUpperCase().slice(0,4)}]</span></td>
+          <td class="font-semibold" style="font-size:13px;">${t.title || 'Untitled'}</td>
+          <td class="font-mono text-xs">${t.source || 'Unknown'}</td>
+          <td class="text-xs">${t.category || '—'}</td>
+          <td class="font-mono text-xs">${t.published ? new Date(t.published).toLocaleDateString() : '—'}</td>
+          <td><button class="btn btn-ghost" style="font-size:11px;padding:2px 6px;" onclick="showToast('Threat details: ${t.id}','info')">View</button></td>
+        </tr>
+      `).join('');
+
+      const indicator = document.getElementById('tf-refresh-indicator');
+      if (indicator) indicator.textContent = `Updated: ${new Date().toLocaleTimeString()} | ${filtered.length} items`;
+    } catch (e) {
+      const tbody = document.getElementById('threat-feed-body');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Failed to load threat feed.</td></tr>';
+    }
+  }
+
+  await fetchThreats();
+  threatFeedInterval = setInterval(fetchThreats, 60000);
+}
+
+function filterThreatFeed() {
+  afterRenderGlobalThreatFeed();
+}
+
+// -------- BULK IMPORT FINDINGS --------
+let bulkImportEngagementId = null;
+
+function showBulkImportModal() {
+  const path = STITCH.currentRoute;
+  const match = path.match(/\/ledger\/([^\/]+)/);
+  if (!match) { showToast('No engagement selected', 'error'); return; }
+  bulkImportEngagementId = match[1];
+  
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.id = 'bulk-import-overlay';
+  overlay.innerHTML = `
+    <div class="card" style="width:90%;max-width:700px;max-height:80vh;overflow-y:auto;">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-display font-bold">Bulk Import Findings</h3>
+        <button class="btn btn-ghost text-sm" onclick="document.getElementById('bulk-import-overlay').remove()">✕</button>
+      </div>
+      <p class="text-xs text-muted mb-2">Paste a JSON array of findings below. Each finding must have: title, severity, description. Optional: cve, node_id, cvss_vector, cvss_score, status, poc, remediation, impact, likelihood, assigned_to.</p>
+      <textarea id="bulk-import-json" class="input w-full font-mono" style="min-height:300px;font-size:12px;" placeholder='[
+  {"title":"SQL Injection","severity":"critical","description":"SQL injection in login","status":"open","category":"web"},
+  {"title":"XSS Vulnerability","severity":"high","description":"Stored XSS in profile","status":"open","category":"web"}
+]'></textarea>
+      <div class="flex justify-end gap-2 mt-4">
+        <button class="btn btn-ghost" onclick="document.getElementById('bulk-import-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="doBulkImport()">Import Findings</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function doBulkImport() {
+  const textarea = document.getElementById('bulk-import-json');
+  if (!textarea) return;
+  let findings;
+  try {
+    findings = JSON.parse(textarea.value);
+    if (!Array.isArray(findings)) throw new Error('Must be an array');
+  } catch (e) {
+    showToast('Invalid JSON: ' + e.message, 'error');
+    return;
+  }
+  for (const f of findings) {
+    if (!f.title || !f.severity) {
+      showToast('Each finding needs title and severity', 'error');
+      return;
+    }
+  }
+  try {
+    const res = await api.post('/engagements/' + bulkImportEngagementId + '/findings/bulk', { findings: findings });
+    showToast('Imported ' + res.data.length + ' findings', 'success');
+    document.getElementById('bulk-import-overlay').remove();
+    // Force re-render to show new findings
+    STITCH.render();
+  } catch (e) {
+    showToast('Import failed: ' + e.message, 'error');
+  }
+}
+
+// -------- LIVE FINDINGS POLLING --------
+let findingsPollInterval = null;
+let lastFindingsCheck = null;
+
+function startFindingsPolling(engagementId) {
+  stopFindingsPolling();
+  lastFindingsCheck = new Date().toISOString();
+  findingsPollInterval = setInterval(async () => {
+    if (!lastFindingsCheck) return;
+    try {
+      const res = await api.get('/engagements/' + engagementId + '/findings/changes?since=' + encodeURIComponent(lastFindingsCheck));
+      if (res.data && res.data.changes && res.data.changes.length > 0) {
+        lastFindingsCheck = res.data.checked_at;
+        showToast(res.data.changes.length + ' finding(s) updated by other analysts', 'info');
+        // Re-render to show updated findings
+        const path = STITCH.currentRoute;
+        if (path.includes('/ledger/' + engagementId)) {
+          STITCH.render();
+        }
+      }
+    } catch (e) {
+      // Silently fail - polling should be resilient
+    }
+  }, 15000); // Poll every 15 seconds
+}
+
+function stopFindingsPolling() {
+  if (findingsPollInterval) {
+    clearInterval(findingsPollInterval);
+    findingsPollInterval = null;
+  }
+}
+
 // -------- UTILITY FUNCTIONS --------
 function timeAgo(dateStr) {
   if (!dateStr) return 'recently';
@@ -1238,6 +1665,96 @@ function insertPocImage(input) {
   input.value = '';
 }
 
+// -------- ADMIN: USER MANAGEMENT --------
+function renderUserManagement() {
+  return `
+    <div>
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="font-display font-bold">Team Members</h3>
+        <button class="btn btn-primary" onclick="showInviteUserModal()">+ Invite User</button>
+      </div>
+      <div class="card" id="user-management-table">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Password Expires</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="user-management-body">
+            <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function afterRenderUserManagement() {
+  try {
+    const res = await api.get('/users');
+    const users = res.data || [];
+    const tbody = document.getElementById('user-management-body');
+    if (users.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No users found.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = users.map(u => {
+      const expiry = new Date(u.password_expiry);
+      const now = new Date();
+      const daysLeft = Math.ceil((expiry - now) / (1000*60*60*24));
+      const expiryClass = daysLeft <= 7 ? 'color:var(--critical)' : daysLeft <= 30 ? 'color:var(--warning)' : '';
+      return `
+      <tr>
+        <td class="font-semibold">${u.name}</td>
+        <td class="font-mono text-xs">${u.email}</td>
+        <td><span class="status-pill ${u.role === 'admin' ? 'critical' : u.role === 'analyst' ? 'in_progress' : 'draft'}">${u.role}</span></td>
+        <td><span class="status-pill open">Active</span></td>
+        <td class="font-mono text-xs" style="${expiryClass}">${daysLeft > 0 ? daysLeft + ' days' : 'EXPIRED'}</td>
+        <td>
+          ${u.role !== 'admin' ? `<button class="btn btn-ghost text-xs" onclick="deleteUser('${u.id}')">Remove</button>` : ''}
+        </td>
+      </tr>
+    `}).join('');
+  } catch (e) {
+    document.getElementById('user-management-body').innerHTML = '<tr><td colspan="6" class="text-center text-muted">Failed to load users.</td></tr>';
+  }
+}
+
+function showInviteUserModal() {
+  const name = prompt('Full name:');
+  if (!name) return;
+  const email = prompt('Email (must be @cyberteq.io):');
+  if (!email) return;
+  if (!email.endsWith('@cyberteq.io')) {
+    showToast('Only @cyberteq.io emails are allowed', 'error');
+    return;
+  }
+  const role = prompt('Role (admin, analyst, or user):');
+  if (!role || !['admin','analyst','user'].includes(role)) {
+    showToast('Invalid role', 'error');
+    return;
+  }
+  api.post('/users', { name, email, role })
+    .then(() => { showToast('User invited successfully', 'success'); STITCH.render(); })
+    .catch(e => showToast(e.message, 'error'));
+}
+
+async function deleteUser(userId) {
+  if (!confirm('Remove this user?')) return;
+  try {
+    await api.del('/users/' + userId);
+    showToast('User removed', 'success');
+    STITCH.render();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
 // -------- AFTER RENDER DISPATCH --------
 function afterRender(path) {
   switch (true) {
@@ -1271,6 +1788,15 @@ function afterRender(path) {
       break;
     case path === '/command/report-builder':
       setTimeout(afterRenderCommandReportBuilder, 50);
+      break;
+    case path === '/command/threat-feed':
+      setTimeout(afterRenderGlobalThreatFeed, 50);
+      break;
+    case path === '/admin/users':
+      setTimeout(afterRenderUserManagement, 50);
+      break;
+    case path === '/reports':
+    case path === '/report-generator':
       break;
   }
 }

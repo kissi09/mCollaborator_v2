@@ -1,3 +1,21 @@
+function sanitizeInput(str) {
+  return str.replace(/[<>"'&]/g, function(c) {
+    return {'<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','&':'&amp;'}[c];
+  });
+}
+
+function isXSSAttempt(str) {
+  const patterns = /<script|javascript:|on\w+\s*=|<iframe|<object|<embed|<form|eval\(|document\.|window\./i;
+  return patterns.test(str);
+}
+
+function validateCyberteqEmail(email) {
+  if (!email || !email.endsWith('@cyberteq.io')) {
+    return false;
+  }
+  return true;
+}
+
 // mCollaborator Global State Management
 let stitchToken, stitchTheme;
 try {
@@ -57,6 +75,7 @@ const STITCH = {
   },
 
   navigate(route, data) {
+    if (typeof stopFindingsPolling === 'function') stopFindingsPolling();
     if (data) {
       if (data.engagement) this.currentEngagement = data.engagement;
       if (data.finding) this.currentFinding = data.finding;
@@ -103,7 +122,7 @@ const STITCH = {
 
     // Determine sidebar type
     let sidebarType = 'cyberpunk'; // default
-    if (path.startsWith('/ledger') || path.startsWith('/finding-editor') || path.startsWith('/evidence') || path.startsWith('/report-generator')) {
+    if (path.startsWith('/ledger') || path.startsWith('/finding-editor') || path.startsWith('/evidence') || path.startsWith('/report-generator') || path.startsWith('/reports') || path.startsWith('/admin')) {
       sidebarType = 'ledger';
     } else if (path.startsWith('/insight')) {
       sidebarType = 'insight';
@@ -153,6 +172,12 @@ const STITCH = {
         break;
       case path === '/command/report-builder':
         pageContent = renderCommandReportBuilder();
+        break;
+      case path === '/command/threat-feed':
+        pageContent = renderGlobalThreatFeed();
+        break;
+      case path === '/admin/users':
+        pageContent = renderUserManagement();
         break;
       default:
         pageContent = renderLedgerDashboard();
@@ -205,6 +230,10 @@ function getPageTitle(path) {
     '/command/engagements': 'Active Engagements',
     '/command/feed': 'Vulnerability Feed',
     '/command/report-builder': 'Report Builder',
+    '/command/threat-feed': 'Threat Intelligence Feed',
+    '/admin/users': 'User Management',
+    '/reports': 'Report Generator',
+    '/report-generator': 'Report Generator',
     '/login': 'Login',
   };
   return titles[path] || 'mCollaborator';
