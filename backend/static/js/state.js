@@ -1,4 +1,4 @@
-// STITCH Global State Management
+// mCollaborator Global State Management
 let stitchToken, stitchTheme;
 try {
   stitchToken = localStorage.getItem('stitch_token');
@@ -207,5 +207,5 @@ function getPageTitle(path) {
     '/command/report-builder': 'Report Builder',
     '/login': 'Login',
   };
-  return titles[path] || 'STITCH';
+  return titles[path] || 'mCollaborator';
 }

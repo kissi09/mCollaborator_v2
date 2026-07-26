@@ -1,4 +1,4 @@
-// STITCH API Client
+// mCollaborator API Client
 const BASE = '/api/v1';
 
 const api = {

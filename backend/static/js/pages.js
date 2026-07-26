@@ -1,5 +1,5 @@
 // ============================================================
-// STITCH — All Page Render Functions
+// mCollaborator — All Page Render Functions
 // ============================================================
 
 // -------- LOGIN --------
@@ -7,10 +7,10 @@ function renderLogin() {
   return `
     <div class="login-card">
       <div class="flex items-center gap-3 mb-4">
-        <div style="width:40px;height:40px;background:var(--primary);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;">⬡</div>
+        <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:40px;">
         <div>
-          <h1 style="margin:0;">STITCH</h1>
-          <p style="margin:0;">Offensive Security Command Center</p>
+          <h1 style="margin:0;">mCollaborator</h1>
+          <p style="margin:0;">By Cyberteq Falcon</p>
         </div>
       </div>
       <p>Sign in to your workspace.</p>
@@ -49,6 +49,9 @@ function renderSidebar(type, currentPath) {
   if (type === 'cyberpunk') {
     return `
       <div class="sidebar">
+        <div style="padding:8px 0;display:flex;justify-content:center;">
+          <img src="/images/cyberteq-logo.png" alt="CT" style="width:36px;height:auto;opacity:0.7;">
+        </div>
         <div class="nav-item" onclick="STITCH.navigate('#/command/dashboard')" title="Global Threat Dashboard">
           <span class="${isActive('/command/dashboard')}" style="font-size:20px;">⬡</span>
         </div>
@@ -76,10 +79,10 @@ function renderSidebar(type, currentPath) {
     return `
       <div class="sidebar">
         <div class="flex items-center gap-3 px-4 mb-6">
-          <div style="width:36px;height:36px;background:var(--primary);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;">⬡</div>
+          <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:28px;max-width:80px;">
           <div>
             <div class="font-display font-bold" style="color:#fff;">Cyberteq</div>
-            <div style="font-size:11px;color:#9CA3AF;font-family:var(--font-mono);">Falcon Ledger</div>
+            <div style="font-size:11px;color:#9CA3AF;font-family:var(--font-mono);">mCollaborator</div>
           </div>
         </div>
         <div class="nav-item ${isActive('/dashboard')}" onclick="STITCH.navigate('#/dashboard')">
@@ -109,10 +112,10 @@ function renderSidebar(type, currentPath) {
   return `
     <div class="sidebar">
       <div class="flex items-center gap-3 px-3 mb-6">
-        <div style="width:36px;height:36px;background:var(--primary);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#0F172A;font-size:18px;">⬡</div>
-        <div>
+          <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:28px;max-width:80px;">
+          <div>
           <div class="font-display font-bold">Falcon Insight</div>
-          <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">Analytics</div>
+          <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">mCollaborator</div>
         </div>
       </div>
       <div class="nav-item ${isActive('/insight/dashboard')}" onclick="STITCH.navigate('#/insight/dashboard')">
@@ -308,39 +311,55 @@ async function afterRenderProjectLedger() {
   }
 }
 
-// -------- LEDGER: FINDING EDITOR --------
+// -------- mCollaborator: FINDING EDITOR --------
 function renderFindingEditor() {
   return `
     <div class="editor-pane" style="height:calc(100vh - 64px - 48px);margin:-24px;">
       <div class="editor-left">
         <div class="flex items-center justify-between px-6 py-3 border-b" style="background:var(--surface);">
-          <span class="text-xs font-mono text-muted">Markdown Editor</span>
+          <span class="text-xs font-mono text-muted">Finding Details</span>
         </div>
-        <textarea class="editor-textarea" id="finding-markdown" placeholder="# Title
+        <div style="padding:16px;overflow-y:auto;flex:1;">
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Title</label>
+            <input class="input w-full" id="finding-title" value="SQL Injection in Login Module" placeholder="Finding title...">
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Description</label>
+            <textarea class="input w-full" id="finding-description" rows="4" placeholder="Describe the vulnerability..." style="resize:vertical;font-family:var(--font-mono);font-size:12px;">The authentication endpoint is vulnerable to SQL injection. User input from the username parameter is directly concatenated into the SQL query without proper sanitization.</textarea>
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Impact</label>
+            <textarea class="input w-full" id="finding-impact" rows="3" placeholder="Business & technical impact..." style="resize:vertical;font-family:var(--font-mono);font-size:12px;">An attacker can bypass authentication, extract sensitive user data, and potentially gain unauthorized access to the entire application database.</textarea>
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">CVSS Vector String</label>
+            <input class="input w-full" id="finding-cvss-vector" value="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" placeholder="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" style="font-family:var(--font-mono);font-size:12px;">
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Affected System</label>
+            <input class="input w-full" id="finding-affected" value="Login Module - /v1/auth/login" placeholder="Target system / endpoint..." style="font-family:var(--font-mono);font-size:12px;">
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Proof of Concept (POC)</label>
+            <div style="position:relative;">
+              <textarea class="input w-full" id="finding-poc" rows="4" placeholder="Detailed steps to reproduce..." style="resize:vertical;font-family:var(--font-mono);font-size:12px;">POST /v1/auth/login
+{"username": "admin' OR '1'='1", "password": "test"}
 
-## Description
-
-Describe the vulnerability...
-
-### Evidence
-
-\`\`\`code\`\`\`"># SQL Injection in Login Module
-
-## Description
-The authentication endpoint is vulnerable to SQL injection. User input from the username parameter is directly concatenated into the SQL query without proper sanitization.
-
-### Evidence
-\`\`\`
-POST /v1/auth/login
-{"username": "admin' OR '1'='1"}
-\`\`\`
-
-### Remediation
-Use parameterized queries.</textarea>
+Response: HTTP 200 with admin session token</textarea>
+              <button type="button" onclick="document.getElementById('poc-image-input').click()" style="position:absolute;bottom:8px;right:8px;background:var(--primary);color:var(--bg);border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">+ Add Image</button>
+              <input type="file" id="poc-image-input" accept="image/*" style="display:none;" onchange="insertPocImage(this)">
+            </div>
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Recommendation</label>
+            <textarea class="input w-full" id="finding-recommendation" rows="3" placeholder="Remediation steps..." style="resize:vertical;font-family:var(--font-mono);font-size:12px;">Use parameterized queries with prepared statements. Implement input validation and apply the principle of least privilege to database accounts.</textarea>
+          </div>
+        </div>
       </div>
       <div class="editor-right">
         <div class="flex items-center justify-between px-6 py-3 border-b">
-          <span class="text-xs font-mono text-muted">Preview & Metadata</span>
+          <span class="text-xs font-mono text-muted">Metadata</span>
         </div>
         <div style="padding:16px;border-bottom:1px solid var(--border);background:var(--bg);">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -784,10 +803,15 @@ async function showFindingDetail(findingId) {
         ${f.poc ? `
         <div class="mb-6">
           <h3 class="font-display font-bold mb-3">Proof of Concept</h3>
-          <pre style="background:${STITCH.theme==='insight'?'#0B1120':'var(--bg)'};padding:16px;border-radius:var(--radius);overflow-x:auto;font-size:12px;line-height:1.5;">${f.poc}</pre>
+          <div id="poc-content" style="background:${STITCH.theme==='insight'?'#0B1120':'var(--bg)'};padding:16px;border-radius:var(--radius);font-size:13px;line-height:1.7;"></div>
         </div>` : ''}
       </div>
     `;
+    // Set POC content as innerHTML to render images
+    const pocDiv = document.getElementById('poc-content');
+    if (pocDiv && f.poc) {
+      pocDiv.innerHTML = f.poc;
+    }
   } catch (e) {
     document.getElementById('analyzer-detail').innerHTML = '<p class="text-muted">Error loading finding.</p>';
   }
@@ -1189,6 +1213,29 @@ function showNewEngagementModal() {
   api.post('/engagements', { name, client_name: client, status: 'planning', methodology: 'owasp', scope: {included:[],excluded:[]}, timeline: {start_date:new Date().toISOString().slice(0,10),end_date:''}, team: [] })
     .then(() => { showToast('Engagement created','success'); STITCH.render(); })
     .catch(e => showToast(e.message,'error'));
+}
+
+function insertPocImage(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('Image too large (max 5MB)', 'error');
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const ta = document.getElementById('finding-poc');
+    const imgTag = `\n\n<img src="${e.target.result}" alt="POC Screenshot" style="max-width:100%;border:1px solid var(--border);border-radius:4px;">\n`;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    ta.value = ta.value.substring(0, start) + imgTag + ta.value.substring(end);
+    ta.selectionStart = ta.selectionEnd = start + imgTag.length;
+    ta.focus();
+    showToast('Image attached to POC', 'success');
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
 }
 
 // -------- AFTER RENDER DISPATCH --------

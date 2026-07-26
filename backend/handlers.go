@@ -467,7 +467,7 @@ func HandleReportDownload(store *Store) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/pdf")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.pdf", report.Title))
-		fmt.Fprintf(w, "STITCH Report: %s\nEngagement: %s\nTemplate: %s\nBlocks: %d", report.Title, report.EngagementID, report.Template, len(report.Blocks))
+		fmt.Fprintf(w, "mCollaborator Report: %s\nEngagement: %s\nTemplate: %s\nBlocks: %d", report.Title, report.EngagementID, report.Template, len(report.Blocks))
 	}
 }
 

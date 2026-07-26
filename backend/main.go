@@ -125,7 +125,7 @@ func main() {
 	})
 
 	addr := fmt.Sprintf(":%s", port)
-	log.Printf("STITCH server starting on http://localhost%s", addr)
+	log.Printf("mCollaborator server starting on http://localhost%s", addr)
 	log.Printf("Login credentials: admin@cyberteq.io / admin123")
 	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatal(err)

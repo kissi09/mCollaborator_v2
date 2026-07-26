@@ -1,4 +1,4 @@
-/* STITCH Design System — 3 Theme Variants */
+/* mCollaborator Design System — 3 Theme Variants */
 
 /* ============ RESET & BASE ============ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -12,7 +12,7 @@ input, textarea, select, button { font-family: inherit; }
 
 /* ============ THEME: Cyberpunk (Strategic Command Center) ============ */
 [data-theme="cyberpunk"] {
-  --primary: #00E5FF;
+  --primary: #FF7900;
   --bg: #090A0F;
   --surface: #12141D;
   --surface-hover: #1A1D27;
@@ -22,7 +22,7 @@ input, textarea, select, button { font-family: inherit; }
   --border: #475569;
   --critical: #FF2A55;
   --warning: #FFB020;
-  --accent: #00E5FF;
+  --accent: #FF7900;
   --radius: 0px;
   --font-display: 'Space Grotesk', sans-serif;
   --font-body: 'IBM Plex Sans', sans-serif;
@@ -33,7 +33,7 @@ input, textarea, select, button { font-family: inherit; }
 
 /* ============ THEME: Ledger (Collaborative Ledger — Light) ============ */
 [data-theme="ledger"] {
-  --primary: #1E3A8A;
+  --primary: #FF7900;
   --bg: #F9FAFB;
   --surface: #FFFFFF;
   --surface-hover: #F3F4F6;
@@ -43,7 +43,7 @@ input, textarea, select, button { font-family: inherit; }
   --border: #E5E7EB;
   --critical: #DC2626;
   --warning: #D97706;
-  --accent: #1E3A8A;
+  --accent: #FF7900;
   --radius: 2px;
   --font-display: 'Merriweather', serif;
   --font-body: 'Source Sans 3', sans-serif;
@@ -54,7 +54,7 @@ input, textarea, select, button { font-family: inherit; }
 
 /* ============ THEME: Insight (Falcon Insight — Dark Slate) ============ */
 [data-theme="insight"] {
-  --primary: #14B8A6;
+  --primary: #FF7900;
   --bg: #0F172A;
   --surface: #1E293B;
   --surface-hover: #334155;
@@ -64,7 +64,7 @@ input, textarea, select, button { font-family: inherit; }
   --border: #334155;
   --critical: #EF4444;
   --warning: #F59E0B;
-  --accent: #06B6D4;
+  --accent: #FF7900;
   --radius: 8px;
   --font-display: 'Space Grotesk', sans-serif;
   --font-body: 'DM Sans', sans-serif;
