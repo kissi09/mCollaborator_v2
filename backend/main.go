@@ -92,7 +92,7 @@ func main() {
 			r.Get("/analytics/global-severity", HandleGlobalSeverity(store))
 		})
 
-		// Reports (with document generation)
+		// Reports (with document generation) — no auth required for export/download
 		r.Post("/reports/export", HandleExportReport(store))
 		r.Get("/reports/download/{type}/{name}", HandleDownloadReport)
 

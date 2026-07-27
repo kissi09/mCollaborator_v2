@@ -508,10 +508,10 @@ async function handleUpload(input) {
 }
 
 // -------- LEDGER: REPORT GENERATOR WIZARD --------
-let reportWizardState = { step: 1, companyName: '', logo: '', projectName: '', sections: [], findings: [], format: 'docx' };
+let reportWizardState = { step: 1, companyName: '', logo: '', projectName: '', refNumber: '', assessmentStart: '', assessmentEnd: '', testerName: '', approverName: '', approverTitle: '', versionLabel: '', scope: '', outOfScope: '', tools: '', sections: [], findings: [], allFindings: [], format: 'docx' };
 
 function renderReportGenerator() {
-  reportWizardState = { step: 1, companyName: '', logo: '', projectName: '', sections: [], findings: [], format: 'docx' };
+  reportWizardState = { step: 1, companyName: '', logo: '', projectName: 'VAPT Report', refNumber: '', assessmentStart: '', assessmentEnd: '', testerName: '', approverName: '', approverTitle: '', versionLabel: 'Details to be Provided', scope: '', outOfScope: '', tools: '', sections: ['wpt'], findings: [], allFindings: [], format: 'docx' };
   return `
     <div style="max-width:900px;margin:0 auto;">
       <div class="flex items-center justify-between mb-6">
@@ -534,13 +534,59 @@ function renderReportGenerator() {
 
 function renderReportStep1() {
   return `
-    <h3 class="font-display font-bold mb-6" style="font-size:18px;">Step 1: Company Info</h3>
-    <div style="margin-bottom:20px;">
-      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Company Name</label>
-      <input class="input w-full" id="wizard-company-name" placeholder="e.g. Acme Corp" value="${reportWizardState.companyName}" oninput="reportWizardState.companyName=this.value">
+    <h3 class="font-display font-bold mb-6" style="font-size:18px;">Step 1: Report Details</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Client Company Name</label>
+        <input class="input w-full" id="wizard-company-name" placeholder="e.g. BestPoint Savings & Loans" value="${reportWizardState.companyName}" oninput="reportWizardState.companyName=this.value">
+      </div>
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Report Title</label>
+        <input class="input w-full" id="wizard-project-name" placeholder="VAPT Report" value="${reportWizardState.projectName || STITCH.currentEngagement?.name || 'VAPT Report'}" oninput="reportWizardState.projectName=this.value">
+      </div>
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Reference Number</label>
+        <input class="input w-full" id="wizard-ref" placeholder="e.g. GH-REP-035-26059-01" value="${reportWizardState.refNumber}" oninput="reportWizardState.refNumber=this.value">
+      </div>
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Version Label</label>
+        <input class="input w-full" id="wizard-version" placeholder="Details to be Provided" value="${reportWizardState.versionLabel}" oninput="reportWizardState.versionLabel=this.value">
+      </div>
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Assessment Start</label>
+        <input class="input w-full" id="wizard-start" placeholder="e.g. 17th June 2026" value="${reportWizardState.assessmentStart}" oninput="reportWizardState.assessmentStart=this.value">
+      </div>
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Assessment End</label>
+        <input class="input w-full" id="wizard-end" placeholder="e.g. 24th June 2026" value="${reportWizardState.assessmentEnd}" oninput="reportWizardState.assessmentEnd=this.value">
+      </div>
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Tester Name (Author)</label>
+        <input class="input w-full" id="wizard-tester" placeholder="Name of Tester" value="${reportWizardState.testerName}" oninput="reportWizardState.testerName=this.value">
+      </div>
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Approver Name</label>
+        <input class="input w-full" id="wizard-approver" placeholder="e.g. Jamal Mekdachi" value="${reportWizardState.approverName}" oninput="reportWizardState.approverName=this.value">
+      </div>
+      <div>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Approver Title</label>
+        <input class="input w-full" id="wizard-approver-title" placeholder="e.g. VP, Operations" value="${reportWizardState.approverTitle}" oninput="reportWizardState.approverTitle=this.value">
+      </div>
     </div>
     <div style="margin-bottom:20px;">
-      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Company Logo</label>
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Scope</label>
+      <textarea class="input w-full" id="wizard-scope" rows="3" placeholder="In-scope targets (one per line, or comma-separated)" style="resize:vertical;font-size:13px;" oninput="reportWizardState.scope=this.value">${reportWizardState.scope}</textarea>
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Out of Scope</label>
+      <textarea class="input w-full" id="wizard-out-of-scope" rows="3" placeholder="Excluded items (one per line)" style="resize:vertical;font-size:13px;" oninput="reportWizardState.outOfScope=this.value">${reportWizardState.outOfScope}</textarea>
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Tools Used</label>
+      <textarea class="input w-full" id="wizard-tools" rows="3" placeholder="One tool per line (e.g. Burp Suite, Nmap, Nuclei)" style="resize:vertical;font-size:13px;" oninput="reportWizardState.tools=this.value">${reportWizardState.tools}</textarea>
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Client Logo</label>
       <div class="flex items-center gap-4">
         <div style="width:80px;height:80px;border:2px dashed var(--border);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;overflow:hidden;" id="wizard-logo-preview">
           ${reportWizardState.logo ? `<img src="${reportWizardState.logo}" style="width:100%;height:100%;object-fit:contain;">` : '<span style="color:var(--muted);font-size:24px;">+</span>'}
@@ -548,13 +594,9 @@ function renderReportStep1() {
         <div>
           <button class="btn btn-secondary" onclick="document.getElementById('wizard-logo-input').click()">Upload Logo</button>
           <input type="file" id="wizard-logo-input" accept="image/*" style="display:none;" onchange="uploadReportLogo(this)">
-          <div class="text-xs text-muted mt-2">PNG, JPG up to 2MB</div>
+          <div class="text-xs text-muted mt-2">PNG, JPG up to 2MB — appears on cover &amp; page headers</div>
         </div>
       </div>
-    </div>
-    <div style="margin-bottom:20px;">
-      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Project Name</label>
-      <input class="input w-full" id="wizard-project-name" placeholder="e.g. FAL-2025-001" value="${reportWizardState.projectName || STITCH.currentEngagement?.name || ''}" oninput="reportWizardState.projectName=this.value">
     </div>
     <div style="display:flex;justify-content:flex-end;margin-top:24px;">
       <button class="btn btn-primary" onclick="reportWizardNext()">Next Step →</button>
@@ -648,6 +690,16 @@ function reportWizardNext() {
   if (reportWizardState.step === 1) {
     reportWizardState.companyName = document.getElementById('wizard-company-name')?.value || reportWizardState.companyName;
     reportWizardState.projectName = document.getElementById('wizard-project-name')?.value || reportWizardState.projectName;
+    reportWizardState.refNumber = document.getElementById('wizard-ref')?.value || reportWizardState.refNumber;
+    reportWizardState.versionLabel = document.getElementById('wizard-version')?.value || reportWizardState.versionLabel;
+    reportWizardState.assessmentStart = document.getElementById('wizard-start')?.value || reportWizardState.assessmentStart;
+    reportWizardState.assessmentEnd = document.getElementById('wizard-end')?.value || reportWizardState.assessmentEnd;
+    reportWizardState.testerName = document.getElementById('wizard-tester')?.value || reportWizardState.testerName;
+    reportWizardState.approverName = document.getElementById('wizard-approver')?.value || reportWizardState.approverName;
+    reportWizardState.approverTitle = document.getElementById('wizard-approver-title')?.value || reportWizardState.approverTitle;
+    reportWizardState.scope = document.getElementById('wizard-scope')?.value || reportWizardState.scope;
+    reportWizardState.outOfScope = document.getElementById('wizard-out-of-scope')?.value || reportWizardState.outOfScope;
+    reportWizardState.tools = document.getElementById('wizard-tools')?.value || reportWizardState.tools;
   }
   if (reportWizardState.step < 4) {
     reportWizardState.step++;
@@ -683,6 +735,7 @@ function loadWizardFindings() {
   if (!container) return;
   api.get(`/engagements/${engId}/findings`).then(res => {
     const findings = res.data || [];
+    reportWizardState.allFindings = findings;
     if (findings.length === 0) {
       container.innerHTML = '<p class="text-muted text-sm p-4">No findings available.</p>';
       return;
@@ -696,21 +749,33 @@ function loadWizardFindings() {
     container.innerHTML = Object.entries(grouped).map(([cat, items]) => `
       <div class="mb-4">
         <div class="text-xs font-mono text-muted uppercase mb-2" style="padding:4px 0;border-bottom:1px solid var(--border);">${cat} (${items.length})</div>
-        ${items.map(f => `
+        ${items.map(f => {
+          const checked = reportWizardState.findings.some(x => x.id === f.id) ? 'checked' : '';
+          return `
           <label class="flex items-center gap-3 p-3" style="cursor:pointer;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background=''">
-            <input type="checkbox" value="${f.id}" ${reportWizardState.findings.includes(f.id) ? 'checked' : ''}
-                   onchange="if(this.checked){reportWizardState.findings.push('${f.id}')}else{reportWizardState.findings=reportWizardState.findings.filter(x=>x!=='${f.id}')}">
+            <input type="checkbox" value="${f.id}" ${checked}
+                   onchange="toggleWizardFinding('${f.id}')">
             <div class="flex-1">
               <div class="font-semibold" style="font-size:13px;">${f.title}</div>
               <div class="text-xs text-muted font-mono">CVSS: ${f.cvss_score || 'N/A'} ${f.cve ? '| ' + f.cve : ''}</div>
             </div>
-          </label>
-        `).join('')}
+          </label>`;
+        }).join('')}
       </div>
     `).join('');
   }).catch(() => {
     container.innerHTML = '<p class="text-muted text-sm p-4">Failed to load findings.</p>';
   });
+}
+
+function toggleWizardFinding(findingId) {
+  const idx = reportWizardState.findings.findIndex(x => x.id === findingId);
+  if (idx >= 0) {
+    reportWizardState.findings.splice(idx, 1);
+  } else {
+    const full = reportWizardState.allFindings.find(x => x.id === findingId);
+    if (full) reportWizardState.findings.push(full);
+  }
 }
 
 function uploadReportLogo(input) {
@@ -734,40 +799,70 @@ function uploadReportLogo(input) {
 
 async function generateReportDocument() {
   showToast('Compiling report document...', 'info');
+  const btn = document.querySelector('[onclick="generateReportDocument()"]');
+  if (btn) btn.disabled = true;
   try {
-    const res = await api.post('/reports/export', {
-      engagement_id: STITCH.currentEngagement?.id || 'eng_001',
+    const scopeArr = reportWizardState.scope ? reportWizardState.scope.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : [];
+    const outOfScopeArr = reportWizardState.outOfScope ? reportWizardState.outOfScope.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : [];
+    const toolsArr = reportWizardState.tools ? reportWizardState.tools.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : [];
+
+    const mappedFindings = reportWizardState.findings.map(f => ({
+      title: f.title || '',
+      description: f.description || '',
+      impact: f.impact || '',
+      cvss_vector: f.cvss_vector || '',
+      cvss_score: String(f.cvss_score || ''),
+      severity: f.severity || 'info',
+      affected_system: f.affected_system || f.node_id || '',
+      poc: f.poc || '',
+      recommendation: f.remediation || f.recommendation || '',
+      category: f.category || 'web',
+      exposure: f.category === 'external' ? 'External' : f.category === 'internal' ? 'Internal' : 'Web',
+      vuln_id: ''
+    }));
+
+    const payload = {
       company_name: reportWizardState.companyName,
-      project_name: reportWizardState.projectName,
-      logo: reportWizardState.logo,
+      company_logo: reportWizardState.logo || '',
+      engagement_name: reportWizardState.projectName || 'VAPT Report',
+      ref_number: reportWizardState.refNumber,
+      assessment_start: reportWizardState.assessmentStart,
+      assessment_end: reportWizardState.assessmentEnd,
+      tester_name: reportWizardState.testerName,
+      approver_name: reportWizardState.approverName,
+      approver_title: reportWizardState.approverTitle,
+      version_label: reportWizardState.versionLabel,
+      scope: scopeArr,
+      out_of_scope: outOfScopeArr,
       sections: reportWizardState.sections,
-      finding_ids: reportWizardState.findings,
-      format: reportWizardState.format
-    });
-    const filename = res.data?.filename;
-    if (filename) {
-      downloadReport(filename);
-    } else {
-      showToast('Report generated', 'success');
-    }
+      test_cases: [],
+      findings: mappedFindings,
+      tools: toolsArr
+    };
+
+    const res = await api.post('/reports/export', payload);
+    const docxUrl = res.data?.docx_url;
+    const pdfUrl = res.data?.pdf_url;
+
     const preview = document.getElementById('report-preview');
     if (preview) {
+      let buttons = '';
+      if (docxUrl) buttons += `<a href="${docxUrl}" target="_blank" class="btn btn-primary" style="text-decoration:none;">📄 Open DOCX</a>`;
+      if (pdfUrl) buttons += `<a href="${pdfUrl}" target="_blank" class="btn btn-secondary" style="text-decoration:none;margin-left:8px;">📕 Open PDF</a>`;
       preview.innerHTML = `
         <div style="text-align:center;padding:40px 0;">
           <div style="font-size:32px;margin-bottom:8px;">✅</div>
-          <p class="font-semibold">Report generated successfully!</p>
-          <button class="btn btn-primary mt-4" onclick="downloadReport('${filename || ''}')">⬇ Download Report</button>
+          <p class="font-semibold mb-4">Report generated successfully!</p>
+          <div style="display:flex;gap:12px;justify-content:center;">${buttons}</div>
         </div>
       `;
     }
+    showToast('Report generated — DOCX and PDF ready', 'success');
   } catch (e) {
     showToast('Report generation failed: ' + (e.message || 'Unknown error'), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
   }
-}
-
-function downloadReport(filename) {
-  if (!filename) return;
-  window.open(`/api/v1/reports/download/${filename}`, '_blank');
 }
 
 // -------- INSIGHT: COMMAND DASHBOARD --------
