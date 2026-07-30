@@ -74,62 +74,117 @@ input, textarea, select, button { font-family: inherit; }
 }
 
 /* ============ LAYOUT ============ */
-.app-shell { display: flex; height: 100vh; overflow: hidden; }
+.app-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
-.sidebar {
-  width: var(--sidebar-width);
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  overflow-y: auto;
-}
-.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.topbar {
+.navbar {
   height: var(--topbar-height);
-  background: var(--bg);
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 20px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  gap: 16px;
+}
+
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
   flex-shrink: 0;
 }
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+/* Brand icon only — the wordmark is never shown in the UI chrome. */
+.brand-mark {
+  height: 26px;
+  width: auto;
+  display: block;
+  flex-shrink: 0;
+}
+
+.brand-mark-lg { height: 40px; }
+
+/* The mark artwork is white, so invert it on the light theme to stay legible. */
+[data-theme="ledger"] .brand-mark { filter: invert(1); }
+
+.nav-title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-link {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.15s;
+  cursor: pointer;
+}
+
+.nav-link:hover { color: var(--primary); }
+.nav-link.active { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.nav-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.nav-user {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ============ THEME-SPECIFIC NAVBAR ============ */
+[data-theme="cyberpunk"] .navbar { border-bottom-color: var(--border); }
+[data-theme="cyberpunk"] .nav-link { border-radius: 0; text-transform: uppercase; letter-spacing: 0.5px; font-size: 12px; }
+[data-theme="cyberpunk"] .nav-link.active { background: transparent; border-bottom: 2px solid var(--primary); }
+
+[data-theme="ledger"] .navbar { background: #101522; border-bottom: 1px solid #1F2937; }
+[data-theme="ledger"] .nav-link { color: #9CA3AF; }
+[data-theme="ledger"] .nav-link:hover { color: #fff; }
+[data-theme="ledger"] .nav-link.active { background: rgba(255,255,255,0.08); color: #fff; }
+[data-theme="ledger"] .nav-title { color: var(--primary); }
+
+[data-theme="insight"] .nav-link { border-radius: 6px; }
+[data-theme="insight"] .nav-link.active { background: var(--primary); color: #0F172A; font-weight: 600; }
+[data-theme="insight"] .nav-select { border-radius: 6px; }
+
 .content { flex: 1; overflow-y: auto; padding: 24px; }
-
-/* ============ SIDEBAR (Cyberpunk — narrow rail) ============ */
-[data-theme="cyberpunk"] .sidebar { width: 64px; align-items: center; padding: 16px 0; }
-[data-theme="cyberpunk"] .sidebar .nav-item {
-  width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
-  color: var(--muted); border-radius: 0; margin: 4px 0; cursor: pointer; position: relative;
-}
-[data-theme="cyberpunk"] .sidebar .nav-item:hover { color: var(--primary); background: var(--surface-hover); }
-[data-theme="cyberpunk"] .sidebar .nav-item.active { color: var(--primary); }
-[data-theme="cyberpunk"] .sidebar .nav-item.active::before {
-  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 20px; background: var(--primary);
-}
-
-/* ============ SIDEBAR (Ledger — full width, dark) ============ */
-[data-theme="ledger"] .sidebar { width: 260px; background: #101522; color: #fff; padding: 24px 16px; }
-[data-theme="ledger"] .sidebar .nav-item {
-  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
-  color: #9CA3AF; border-radius: 2px; cursor: pointer; font-size: 14px; font-weight: 500;
-  border-left: 2px solid transparent; margin-bottom: 2px;
-}
-[data-theme="ledger"] .sidebar .nav-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
-[data-theme="ledger"] .sidebar .nav-item.active { background: rgba(255,255,255,0.08); color: #fff; border-left-color: var(--primary); }
-
-/* ============ SIDEBAR (Insight — dark slate) ============ */
-[data-theme="insight"] .sidebar { width: 250px; padding: 16px; }
-[data-theme="insight"] .sidebar .nav-item {
-  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
-  color: var(--muted); border-radius: 8px; cursor: pointer; font-size: 14px;
-  margin-bottom: 2px; transition: all 0.15s;
-}
-[data-theme="insight"] .sidebar .nav-item:hover { background: var(--surface-hover); color: var(--text); }
-[data-theme="insight"] .sidebar .nav-item.active { background: var(--primary); color: #0F172A; font-weight: 600; }
 
 /* ============ COMMON COMPONENTS ============ */
 .card {
@@ -210,6 +265,25 @@ input, textarea, select, button { font-family: inherit; }
 .login-card label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; }
 .login-card .input { width: 100%; margin-bottom: 16px; }
 .login-card .btn { width: 100%; justify-content: center; padding: 12px; }
+
+/* ============ MODALS ============ */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.modal-panel {
+  width: 100%; max-width: 560px;
+  max-height: 85vh; overflow-y: auto;
+  padding: 24px;
+}
+.modal-label {
+  font-size: 12px; font-weight: 600;
+  display: block; margin-bottom: 4px;
+  color: var(--muted);
+}
+.btn-sm { padding: 4px 10px; font-size: 12px; }
 
 /* ============ LOADING ============ */
 .skeleton {

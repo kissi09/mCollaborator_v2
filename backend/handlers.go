@@ -75,10 +75,14 @@ func HandleListUsers(store *Store) http.HandlerFunc {
 }
 
 type createUserInput struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
-	Role  string `json:"role"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Role     string `json:"role"`
+	Password string `json:"password"`
 }
+
+// minPasswordLength is the shortest password an admin may set for a new user.
+const minPasswordLength = 8
 
 func HandleCreateUser(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -91,13 +95,20 @@ func HandleCreateUser(store *Store) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "email, name, and role are required"}})
 			return
 		}
-		if input.Role != "admin" && input.Role != "analyst" && input.Role != "user" {
-			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "role must be admin, analyst, or user"}})
+		if input.Role != "admin" && input.Role != "analyst" && input.Role != "user" && input.Role != "client" {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "role must be admin, analyst, user, or client"}})
+			return
+		}
+		if len(input.Password) < minPasswordLength {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: fmt.Sprintf("password must be at least %d characters", minPasswordLength)}})
 			return
 		}
 		user := r.Context().Value(userContextKey).(*User)
-		// Hash password with bcrypt (default password: "changeme123")
-		hash, _ := bcrypt.GenerateFromPassword([]byte("changeme123"), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{Error: &ApiError{Code: "INTERNAL", Message: "Could not set password"}})
+			return
+		}
 		newUser := &User{
 			ID:             uuid.New().String(),
 			OrgID:          user.OrgID,

@@ -7,7 +7,7 @@ function renderLogin() {
   return `
     <div class="login-card">
       <div class="flex items-center gap-3 mb-4">
-        <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:40px;">
+        <img src="/images/cyberteq-mark.png" alt="" class="brand-mark brand-mark-lg">
         <div>
           <h1 style="margin:0;">mCollaborator</h1>
           <p style="margin:0;">By Cyberteq Falcon</p>
@@ -16,13 +16,10 @@ function renderLogin() {
       <p>Sign in to your workspace.</p>
       <form onsubmit="handleLogin(event)">
         <label for="email">Email</label>
-        <input type="email" id="email" class="input" value="username@cyberteq.io" placeholder="username@cyberteq.io" required>
+        <input type="email" id="email" class="input" placeholder="you@example.com" autocomplete="username" required>
         <label for="password">Password</label>
-        <input type="password" id="password" class="input" value="admin123" placeholder="••••••••" required>
+        <input type="password" id="password" class="input" placeholder="••••••••" autocomplete="current-password" required>
         <button type="submit" class="btn btn-primary">Sign In</button>
-        <p style="margin-top:16px;font-size:12px;color:var(--muted);text-align:center;">
-          Demo: username@cyberteq.io / admin123
-        </p>
       </form>
     </div>
   `;
@@ -36,8 +33,8 @@ async function handleLogin(e) {
     showToast('Invalid input detected', 'error');
     return;
   }
-  if (!validateCyberteqEmail(email)) {
-    showToast('Only @cyberteq.io email addresses are allowed', 'error');
+  if (!validateEmail(email)) {
+    showToast('Enter a valid email address', 'error');
     return;
   }
   const safeEmail = sanitizeInput(email);
@@ -51,116 +48,7 @@ async function handleLogin(e) {
   }
 }
 
-// -------- SIDEBAR --------
-function renderSidebar(type, currentPath) {
-  const isActive = (path) => currentPath === path ? 'active' : '';
 
-  if (type === 'cyberpunk') {
-    return `
-      <div class="sidebar">
-        <div style="padding:8px 0;display:flex;justify-content:center;">
-          <img src="/images/cyberteq-logo.png" alt="C" style="height:28px;object-fit:cover;object-position:left;clip-path:inset(0 60% 0 0);">
-        </div>
-        <div class="nav-item" onclick="STITCH.navigate('#/command/dashboard')" title="Global Threat Dashboard">
-          <span class="${isActive('/command/dashboard')}" style="font-size:20px;">⬡</span>
-        </div>
-        <div class="nav-item ${isActive('/command/engagements')}" onclick="STITCH.navigate('#/command/engagements')" title="Active Engagements">
-          <span style="font-size:20px;">◉</span>
-        </div>
-        <div class="nav-item ${isActive('/command/feed')}" onclick="STITCH.navigate('#/command/feed')" title="Vulnerability Feed">
-          <span style="font-size:20px;">☰</span>
-        </div>
-        <div class="nav-item ${isActive('/command/report-builder')}" onclick="STITCH.navigate('#/command/report-builder')" title="Report Builder">
-          <span style="font-size:20px;">▣</span>
-        </div>
-        <div class="nav-item ${isActive('/command/threat-feed')}" onclick="STITCH.navigate('#/command/threat-feed')" title="Threat Feed">
-          <span style="font-size:20px;">⚠</span>
-        </div>
-        <div class="nav-item ${isActive('/admin/users')}" onclick="STITCH.navigate('#/admin/users')" title="User Management">
-          <span style="font-size:20px;">👥</span>
-        </div>
-        <div style="flex:1;"></div>
-        <div class="nav-item ${isActive('/dashboard')}" onclick="STITCH.navigate('#/dashboard')" title="Ledger Dashboard">
-          <span style="font-size:16px;">📋</span>
-        </div>
-        <div class="nav-item ${isActive('/insight/dashboard')}" onclick="STITCH.navigate('#/insight/dashboard')" title="Insight Dashboard">
-          <span style="font-size:16px;">📊</span>
-        </div>
-      </div>
-    `;
-  }
-
-  if (type === 'ledger') {
-    return `
-      <div class="sidebar">
-        <div class="flex items-center gap-3 px-4 mb-6">
-          <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:24px;object-fit:contain;">
-          <div>
-            <div class="font-display font-bold" style="color:#fff;">Cyberteq</div>
-            <div style="font-size:11px;color:#9CA3AF;font-family:var(--font-mono);">mCollaborator</div>
-          </div>
-        </div>
-        <div class="nav-item ${isActive('/dashboard')}" onclick="STITCH.navigate('#/dashboard')">
-          <span>📊</span> Dashboard
-        </div>
-        <div class="nav-item ${isActive('/ledger/project')}" onclick="STITCH.navigate('#/ledger/project')">
-          <span>📁</span> Project Ledger
-        </div>
-        <div class="nav-item ${isActive('/finding-editor')}" onclick="STITCH.navigate('#/finding-editor')">
-          <span>✏️</span> Finding Editor
-        </div>
-        <div class="nav-item ${isActive('/evidence')}" onclick="STITCH.navigate('#/evidence')">
-          <span>🗄️</span> Evidence Vault
-        </div>
-        <div class="nav-item ${isActive('/reports')}" onclick="STITCH.navigate('#/reports')">
-          <span>📄</span> Report Generator
-        </div>
-        <div class="nav-item ${isActive('/command/threat-feed')}" onclick="STITCH.navigate('#/command/threat-feed')">
-          <span>⚠</span> Threat Feed
-        </div>
-        <div style="flex:1;"></div>
-        <div class="nav-item" style="font-size:11px;color:#6B7280;">
-          <span style="font-size:11px;">👤</span> ${STITCH.user?.name || 'User'}
-        </div>
-      </div>
-    `;
-  }
-
-  // Insight sidebar
-  return `
-    <div class="sidebar">
-      <div class="flex items-center gap-3 px-3 mb-6">
-          <img src="/images/cyberteq-logo.png" alt="Cyberteq" style="height:24px;object-fit:contain;">
-          <div>
-          <div class="font-display font-bold">Falcon Insight</div>
-          <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">mCollaborator</div>
-        </div>
-      </div>
-      <div class="nav-item ${isActive('/insight/dashboard')}" onclick="STITCH.navigate('#/insight/dashboard')">
-        <span>📊</span> Command Dashboard
-      </div>
-      <div class="nav-item ${isActive('/insight/projects')}" onclick="STITCH.navigate('#/insight/projects')">
-        <span>📋</span> Audit Projects
-      </div>
-      <div class="nav-item ${isActive('/insight/analyzer')}" onclick="STITCH.navigate('#/insight/analyzer')">
-        <span>🔍</span> Finding Analyzer
-      </div>
-      <div class="nav-item ${isActive('/insight/generator')}" onclick="STITCH.navigate('#/insight/generator')">
-        <span>🤖</span> Insight Generator
-      </div>
-      <div style="flex:1;"></div>
-      <div style="padding:12px;border-top:1px solid var(--border);margin-top:16px;">
-        <div class="flex items-center gap-3">
-          <div style="width:32px;height:32px;border-radius:8px;background:var(--surface-hover);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">AJ</div>
-          <div>
-            <div style="font-size:13px;font-weight:500;">${STITCH.user?.name || 'User'}</div>
-            <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">Lead Analyst</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
 
 // -------- LEDGER: DASHBOARD --------
 function renderLedgerDashboard() {
@@ -169,12 +57,23 @@ function renderLedgerDashboard() {
       <div class="flex flex-col gap-4" style="grid-column:1/3;">
         <div class="flex items-center justify-between border-b pb-2">
           <h3 class="font-display font-bold">Active Projects</h3>
-          <span class="text-sm text-muted">4 Ongoing</span>
+          <div class="flex items-center gap-3">
+            <span class="text-sm text-muted" id="ledger-active-count">—</span>
+            ${isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="showNewEngagementModal()">+ New Project</button>` : ''}
+          </div>
         </div>
         <div id="ledger-project-list">
           <div class="skeleton" style="height:80px;margin-bottom:8px;"></div>
           <div class="skeleton" style="height:80px;margin-bottom:8px;"></div>
           <div class="skeleton" style="height:80px;"></div>
+        </div>
+
+        <div class="flex items-center justify-between border-b pb-2 mt-4">
+          <h3 class="font-display font-bold">Recently Completed</h3>
+          <span class="text-sm text-muted" id="ledger-completed-count">Last 90 days</span>
+        </div>
+        <div id="ledger-completed-list">
+          <div class="skeleton" style="height:56px;margin-bottom:8px;"></div>
         </div>
       </div>
       <div class="flex flex-col gap-4">
@@ -190,6 +89,26 @@ function renderLedgerDashboard() {
   `;
 }
 
+// A project counts as completed once its status is closed/completed.
+function isCompletedEngagement(e) {
+  return e.status === 'closed' || e.status === 'completed';
+}
+
+// Completion date: prefer the scheduled end date, fall back to last update.
+function engagementCompletedAt(e) {
+  return e.timeline?.end_date || e.updated_at || '';
+}
+
+function completedWithinDays(e, days) {
+  const raw = engagementCompletedAt(e);
+  if (!raw) return false;
+  const when = new Date(raw);
+  if (isNaN(when)) return false;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  return when >= cutoff && when <= new Date();
+}
+
 async function afterRenderLedgerDashboard() {
   try {
     const [engRes, actRes] = await Promise.all([
@@ -199,7 +118,17 @@ async function afterRenderLedgerDashboard() {
     const engagements = engRes.data || [];
     const activities = actRes.data || [];
 
-    document.getElementById('ledger-project-list').innerHTML = engagements.map(e => `
+    const active = engagements.filter(e => !isCompletedEngagement(e));
+    const completed = engagements
+      .filter(e => isCompletedEngagement(e) && completedWithinDays(e, 90))
+      .sort((a, b) => new Date(engagementCompletedAt(b)) - new Date(engagementCompletedAt(a)));
+
+    document.getElementById('ledger-active-count').textContent =
+      `${active.length} Ongoing`;
+    document.getElementById('ledger-completed-count').textContent =
+      `${completed.length} in the last 90 days`;
+
+    document.getElementById('ledger-project-list').innerHTML = active.length ? active.map(e => `
       <a class="flex items-start gap-4 p-4 card mb-3" style="cursor:pointer;" onclick="STITCH.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
         <div class="flex-1">
           <div class="flex items-center gap-3 mb-1">
@@ -217,7 +146,23 @@ async function afterRenderLedgerDashboard() {
         </div>
         <span style="color:var(--muted);">→</span>
       </a>
-    `).join('');
+    `).join('') : '<p class="text-sm text-muted">No active projects.</p>';
+
+    document.getElementById('ledger-completed-list').innerHTML = completed.length ? completed.map(e => `
+      <a class="flex items-start gap-4 p-4 card mb-3" style="cursor:pointer;opacity:0.85;" onclick="STITCH.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
+        <div class="flex-1">
+          <div class="flex items-center gap-3 mb-1">
+            <h4 class="font-display font-bold" style="font-size:15px;">${e.name}</h4>
+            <span class="status-pill ${e.status}">${e.status.replace('_',' ')}</span>
+          </div>
+          <p class="text-sm text-muted mb-3">Client: ${e.client_name || 'N/A'} | ${(e.scope?.included||[]).length} targets</p>
+          <div class="flex items-center gap-4">
+            <span class="text-xs text-muted font-mono">Completed ${timeAgo(engagementCompletedAt(e))}</span>
+          </div>
+        </div>
+        <span style="color:var(--muted);">→</span>
+      </a>
+    `).join('') : '<p class="text-sm text-muted">No projects completed in the last 90 days.</p>';
 
     document.getElementById('ledger-activity').innerHTML = activities.map(a => `
       <div class="flex gap-3 mb-4" style="font-size:13px;">
@@ -230,6 +175,8 @@ async function afterRenderLedgerDashboard() {
     `).join('');
   } catch (e) {
     document.getElementById('ledger-project-list').innerHTML = '<p class="text-muted">Failed to load projects.</p>';
+    const done = document.getElementById('ledger-completed-list');
+    if (done) done.innerHTML = '<p class="text-muted">Failed to load projects.</p>';
   }
 }
 
@@ -286,7 +233,7 @@ async function afterRenderProjectLedger() {
     `).join('') : '<p class="text-sm text-muted">No nodes found.</p>';
 
     document.getElementById('project-findings').innerHTML = findings.map(f => `
-      <div class="flex items-start gap-3 p-3 card mb-2" style="cursor:pointer;" onclick="STITCH.navigate('#/insight/analyzer',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})">
+      <div class="flex items-start gap-3 p-3 card mb-2" style="cursor:pointer;" onclick="STITCH.navigate('#/finding-detail',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})">
         <div class="badge-severity ${f.severity}" style="flex-shrink:0;width:48px;text-align:center;">${f.cvss_score||''}</div>
         <div class="flex-1">
           <div class="flex items-center justify-between">
@@ -328,9 +275,8 @@ async function afterRenderProjectLedger() {
       if (el) el.innerHTML = '<p class="text-muted text-sm">Failed to load.</p>';
     });
   }
-  const path = STITCH.currentRoute;
-  const match = path.match(/\/ledger\/([^\/]+)/);
-  if (match) startFindingsPolling(match[1]);
+    const engId = STITCH.currentEngagement?.id || 'eng_001';
+    if (engId) startFindingsPolling(engId);
 }
 
 // -------- mCollaborator: FINDING EDITOR --------
@@ -865,160 +811,8 @@ async function generateReportDocument() {
   }
 }
 
-// -------- INSIGHT: COMMAND DASHBOARD --------
-function renderInsightDashboard() {
-  return `
-    <div class="dashboard-grid" style="grid-template-columns:repeat(3,1fr);">
-      <div class="metric-widget">
-        <div class="label">Total Findings</div>
-        <div class="value" id="insight-total">—</div>
-      </div>
-      <div class="metric-widget">
-        <div class="label">Critical</div>
-        <div class="value" style="color:var(--critical);" id="insight-critical">—</div>
-      </div>
-      <div class="metric-widget">
-        <div class="label">Open</div>
-        <div class="value" style="color:var(--primary);" id="insight-open">—</div>
-      </div>
-    </div>
-    <div class="flex gap-4 mt-6" style="height:400px;">
-      <div class="card flex-1 p-4">
-        <h4 class="font-display font-bold mb-4">Findings Over Time</h4>
-        <div id="insight-chart" style="height:300px;">
-          <div class="skeleton" style="height:300px;"></div>
-        </div>
-      </div>
-      <div class="card" style="width:350px;padding:16px;">
-        <h4 class="font-display font-bold mb-4">Top Assets</h4>
-        <div id="insight-assets">
-          <div class="skeleton" style="height:40px;margin-bottom:8px;"></div>
-          <div class="skeleton" style="height:40px;"></div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-async function afterRenderInsightDashboard() {
-  try {
-    const [sevRes, statusRes, chartRes, assetsRes] = await Promise.all([
-      api.get('/analytics/severity-count'),
-      api.get('/analytics/status-count'),
-      api.get('/analytics/findings-over-time'),
-      api.get('/analytics/top-assets')
-    ]);
-    const sev = sevRes.data || {};
-    const status = statusRes.data || {};
-    const chart = chartRes.data || [];
-    const assets = assetsRes.data || [];
-
-    const total = Object.values(sev).reduce((a,b) => a+b, 0);
-    document.getElementById('insight-total').textContent = total;
-    document.getElementById('insight-critical').textContent = sev.critical || 0;
-    document.getElementById('insight-open').textContent = (status.open || 0) + (status.draft || 0);
-
-    // Simple chart bars
-    const chartContainer = document.getElementById('insight-chart');
-    const maxVal = Math.max(...chart.flatMap(m => [m.critical, m.high, m.medium, m.low]), 1);
-    chartContainer.innerHTML = `
-      <div style="display:flex;align-items:flex-end;gap:8px;height:250px;padding-top:20px;">
-        ${chart.map(m => `
-          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-            <div style="width:100%;display:flex;flex-direction:column;align-items:center;gap:2px;justify-content:flex-end;height:220px;">
-              <div style="width:60%;background:var(--critical);border-radius:2px;height:${(m.critical/maxVal)*180}px;min-height:4px;" title="Critical: ${m.critical}"></div>
-              <div style="width:60%;background:var(--warning);border-radius:2px;height:${(m.high/maxVal)*180}px;min-height:4px;" title="High: ${m.high}"></div>
-              <div style="width:60%;background:var(--primary);border-radius:2px;height:${(m.medium/maxVal)*180}px;min-height:4px;" title="Medium: ${m.medium}"></div>
-              <div style="width:60%;background:var(--muted);border-radius:2px;height:${(m.low/maxVal)*180}px;min-height:4px;" title="Low: ${m.low}"></div>
-            </div>
-            <span class="text-xs text-muted font-mono">${m.month?.slice(5) || ''}</span>
-          </div>
-        `).join('')}
-      </div>
-      <div class="flex gap-4 mt-2">
-        <span class="text-xs flex items-center gap-1"><span style="width:8px;height:8px;border-radius:2px;background:var(--critical);display:inline-block;"></span> Critical</span>
-        <span class="text-xs flex items-center gap-1"><span style="width:8px;height:8px;border-radius:2px;background:var(--warning);display:inline-block;"></span> High</span>
-        <span class="text-xs flex items-center gap-1"><span style="width:8px;height:8px;border-radius:2px;background:var(--primary);display:inline-block;"></span> Medium</span>
-        <span class="text-xs flex items-center gap-1"><span style="width:8px;height:8px;border-radius:2px;background:var(--muted);display:inline-block;"></span> Low</span>
-      </div>
-    `;
-
-    document.getElementById('insight-assets').innerHTML = assets.map(a => `
-      <div class="flex items-center justify-between py-2 border-b" style="font-size:13px;">
-        <span class="font-mono" style="font-size:12px;">${a.target || 'Unknown'}</span>
-        <span style="color:var(--critical);font-family:var(--font-mono);font-weight:700;">${a.count} findings</span>
-      </div>
-    `).join('') || '<p class="text-sm text-muted">No data</p>';
-  } catch (e) {
-    ['insight-total','insight-critical','insight-open'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = '—';
-    });
-  }
-}
-
-// -------- INSIGHT: AUDIT PROJECTS --------
-function renderAuditProjects() {
-  return `
-    <div class="flex items-center gap-4 mb-6">
-      <input class="input" style="flex:1;" placeholder="Search projects..." oninput="filterAuditProjects(this.value)">
-      <button class="btn btn-primary" onclick="showNewEngagementModal()">+ New Audit</button>
-    </div>
-    <div class="card" id="audit-projects-table">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Project ID</th>
-            <th>Client</th>
-            <th>Methodology</th>
-            <th>Status</th>
-            <th>Targets</th>
-            <th>Due</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="audit-projects-body">
-          <tr><td colspan="7" class="text-center text-muted">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-async function afterRenderAuditProjects() {
-  try {
-    const res = await api.get('/engagements');
-    const engagements = res.data || [];
-    const tbody = document.getElementById('audit-projects-body');
-    if (engagements.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No projects found.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = engagements.map(e => `
-      <tr onclick="STITCH.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
-        <td class="font-mono" style="font-size:12px;">${e.id?.slice(0,8)}</td>
-        <td>${e.client_name || 'N/A'}</td>
-        <td><span class="font-mono text-xs">${(e.methodology || 'N/A').toUpperCase()}</span></td>
-        <td><span class="status-pill ${e.status}">${e.status?.replace('_',' ')}</span></td>
-        <td>${e.scope?.included?.length || 0}</td>
-        <td class="font-mono text-xs">${e.timeline?.end_date || 'N/A'}</td>
-        <td><span style="color:var(--muted);">…</span></td>
-      </tr>
-    `).join('');
-  } catch (e) {
-    document.getElementById('audit-projects-body').innerHTML = '<tr><td colspan="7" class="text-center text-muted">Failed to load.</td></tr>';
-  }
-}
-
-function filterAuditProjects(val) {
-  const rows = document.querySelectorAll('#audit-projects-body tr');
-  rows.forEach(r => {
-    r.style.display = r.textContent.toLowerCase().includes(val.toLowerCase()) ? '' : 'none';
-  });
-}
-
-// -------- INSIGHT: FINDING ANALYZER --------
-function renderFindingAnalyzer() {
+// -------- FINDING DETAIL --------
+function renderFindingDetail() {
   return `
     <div class="flex" style="height:calc(100vh - 64px - 48px);margin:-24px;">
       <div style="width:400px;border-right:1px solid var(--border);overflow-y:auto;" class="p-3" id="analyzer-list">
@@ -1034,7 +828,7 @@ function renderFindingAnalyzer() {
   `;
 }
 
-async function afterRenderFindingAnalyzer() {
+async function afterRenderFindingDetail() {
   try {
     const engId = STITCH.currentEngagement?.id || 'eng_001';
     const res = await api.get(`/engagements/${engId}/findings`);
@@ -1125,124 +919,6 @@ async function showFindingDetail(findingId) {
     }
   } catch (e) {
     document.getElementById('analyzer-detail').innerHTML = '<p class="text-muted">Error loading finding.</p>';
-  }
-}
-
-// -------- INSIGHT: INSIGHT GENERATOR --------
-function renderInsightGenerator() {
-  return `
-    <div class="document-container" style="padding-bottom:80px;">
-      <div class="card" style="padding:32px;">
-        <input class="font-display font-bold" style="font-size:28px;width:100%;border:none;background:transparent;color:var(--text);outline:none;" value="Systemic Risk Analysis: Q3" placeholder="Report Title...">
-        <div class="flex items-center gap-6 text-sm text-muted font-mono mt-2 mb-8">
-          <span>Generated: ${new Date().toLocaleDateString()}</span>
-          <span>Author: ${STITCH.user?.name || 'Analyst'}</span>
-        </div>
-        <div class="block-wrapper mb-6" style="position:relative;">
-          <div class="flex items-start gap-3">
-            <div class="font-display font-bold" style="font-size:20px;color:var(--primary);flex-shrink:0;">Executive Summary</div>
-            <div style="line-height:1.7;">Analysis of recent telemetry indicates a systemic risk posture centered around legacy authentication mechanisms. The concentration of critical vulnerabilities suggests an immediate need for zero-trust architecture overhaul.</div>
-          </div>
-        </div>
-        <div class="block-wrapper mb-6" style="position:relative;">
-          <h4 class="font-display font-bold mb-4">Authentication Bypass Frequency</h4>
-          <div style="height:200px;background:var(--bg);border-radius:var(--radius);padding:24px;display:flex;align-items:flex-end;gap:16px;">
-            ${['May','Jun','Jul','Aug','Sep'].map((m,i) => `
-              <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;">
-                <div style="width:60%;background:${i===3?'var(--critical)':'var(--primary)'};border-radius:4px;height:${[40,60,100,180,80][i]}px;opacity:0.8;"></div>
-                <span class="text-xs text-muted font-mono">${m}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-        <div style="text-align:center;margin-top:24px;">
-          <button class="btn btn-secondary" onclick="showToast('Add block','info')">+ Add Insight Block</button>
-        </div>
-      </div>
-      <div style="position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:16px 24px;display:flex;justify-content:center;gap:12px;">
-        <button class="btn btn-secondary" onclick="showToast('Exporting PDF...','info')">Export PDF</button>
-        <button class="btn btn-secondary" onclick="showToast('Exporting DOCX...','info')">Export DOCX</button>
-        <button class="btn btn-primary" onclick="showToast('Draft saved','success')">Save Draft</button>
-      </div>
-    </div>
-  `;
-}
-
-// -------- COMMAND CENTER: GLOBAL THREAT DASHBOARD --------
-function renderGlobalThreatDashboard() {
-  return `
-    <div class="dashboard-grid" style="grid-template-columns:repeat(4,1fr);">
-      <div class="metric-widget" style="border-top:2px solid var(--primary);">
-        <div class="label">Infrastructure Health</div>
-        <div class="value" style="color:var(--primary);font-size:28px;">98.2%</div>
-        <div class="text-xs text-muted">24 services monitored</div>
-      </div>
-      <div class="metric-widget" style="border-top:2px solid var(--critical);">
-        <div class="label">Critical Alerts</div>
-        <div class="value" style="color:var(--critical);" id="cmd-critical">—</div>
-        <div class="text-xs text-muted">Requires immediate action</div>
-      </div>
-      <div class="metric-widget" style="border-top:2px solid var(--warning);">
-        <div class="label">Active Engagements</div>
-        <div class="value" id="cmd-engagements">—</div>
-        <div class="text-xs text-muted">In progress</div>
-      </div>
-      <div class="metric-widget" style="border-top:2px solid var(--primary);">
-        <div class="label">Total Findings</div>
-        <div class="value" id="cmd-findings">—</div>
-        <div class="text-xs text-muted">Across all projects</div>
-      </div>
-    </div>
-    <div class="flex gap-4 mt-6">
-      <div class="card flex-1 p-4" style="height:300px;">
-        <h4 class="font-display font-bold mb-4" style="color:var(--critical);">⚠ Critical Alerts Feed</h4>
-        <div id="cmd-alerts">
-          <div class="flex items-center gap-3 p-3 mb-2" style="border:1px solid var(--critical);background:color-mix(in srgb, var(--critical) 10%, transparent);">
-            <span class="badge-severity critical">CRIT</span>
-            <div class="flex-1">
-              <div class="font-semibold" style="font-size:13px;">SQL Injection in Auth Endpoint</div>
-              <div class="text-xs text-muted font-mono">Source: 10.0.0.15 • 2 min ago</div>
-            </div>
-          </div>
-          <div class="flex items-center gap-3 p-3 mb-2" style="border:1px solid var(--critical);background:color-mix(in srgb, var(--critical) 10%, transparent);">
-            <span class="badge-severity critical">CRIT</span>
-            <div class="flex-1">
-              <div class="font-semibold" style="font-size:13px;">RCE via File Upload</div>
-              <div class="text-xs text-muted font-mono">Source: api.apex.com • 15 min ago</div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="card p-4" style="width:350px;">
-        <h4 class="font-display font-bold mb-4">System Status</h4>
-        <div class="gauge-ring mx-auto mb-4">
-          <svg viewBox="0 0 120 120">
-            <circle cx="60" cy="60" r="54" fill="none" stroke="var(--muted)" stroke-width="6" opacity="0.3"/>
-            <circle cx="60" cy="60" r="54" fill="none" stroke="var(--primary)" stroke-width="6" stroke-dasharray="339.292" stroke-dashoffset="30" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <div style="text-align:center;">
-          <div class="font-display font-bold" style="font-size:24px;color:var(--primary);">Operational</div>
-          <div class="text-xs text-muted mt-2">All systems nominal</div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-async function afterRenderGlobalThreatDashboard() {
-  try {
-    const [engRes, sevRes] = await Promise.all([
-      api.get('/engagements'),
-      api.get('/analytics/global-severity')
-    ]);
-    const engagements = engRes.data || [];
-    const severity = sevRes.data || {};
-    document.getElementById('cmd-engagements').textContent = engagements.filter(e => e.status !== 'closed').length;
-    document.getElementById('cmd-findings').textContent = Object.values(severity).reduce((a,b) => a+b, 0);
-    document.getElementById('cmd-critical').textContent = severity.critical || 0;
-  } catch (e) {
-    // Fallback to static
   }
 }
 
@@ -1389,7 +1065,7 @@ async function afterRenderVulnerabilityFeed() {
       return;
     }
     tbody.innerHTML = findings.map(f => `
-      <tr class="${f.severity === 'critical' ? 'vuln-critical' : ''}" onclick="STITCH.navigate('#/insight/analyzer',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})"
+      <tr class="${f.severity === 'critical' ? 'vuln-critical' : ''}" onclick="STITCH.navigate('#/finding-detail',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})"
           style="${f.severity === 'critical' ? 'animation: pulseCritical 2s infinite;' : ''}">
         <td><span class="badge-severity ${f.severity}" style="display:block;text-align:center;">[${f.severity.toUpperCase().slice(0,4)}]</span></td>
         <td class="font-semibold" style="font-size:13px;font-family:var(--font-mono);">${f.title}</td>
@@ -1482,132 +1158,12 @@ function onDragStart(event, findingId) {
   if (dz) dz.classList.remove('hidden');
 }
 
-// -------- COMMAND CENTER: GLOBAL THREAT FEED --------
-function renderGlobalThreatFeed() {
-  return `
-    <div style="display:flex;height:calc(100vh - 64px - 48px);margin:-24px;">
-      <div style="width:220px;border-right:1px solid var(--border);padding:16px;overflow-y:auto;">
-        <h4 class="font-display font-bold text-sm mb-4">Filters</h4>
-        <div class="mb-4">
-          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">Severity</label>
-          <label class="flex items-center gap-2 text-sm mb-2"><input type="checkbox" id="tf-sev-critical" checked> <span style="color:var(--critical);">Critical</span></label>
-          <label class="flex items-center gap-2 text-sm mb-2"><input type="checkbox" id="tf-sev-high" checked> <span style="color:var(--warning);">High</span></label>
-          <label class="flex items-center gap-2 text-sm mb-2"><input type="checkbox" id="tf-sev-medium" checked> Medium</label>
-          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="tf-sev-low"> Low</label>
-        </div>
-        <div class="mb-4">
-          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">Source</label>
-          <select class="input w-full" id="tf-source-filter" style="padding:4px 8px;font-size:12px;" onchange="filterThreatFeed()">
-            <option value="">All Sources</option>
-            <option value="cve">CVE/NVD</option>
-            <option value="osint">OSINT</option>
-            <option value="internal">Internal</option>
-            <option value="ti-feed">TI Feed</option>
-          </select>
-        </div>
-        <button class="btn btn-secondary w-full" style="font-size:12px;" onclick="afterRenderGlobalThreatFeed()">↻ Refresh</button>
-      </div>
-      <div style="flex-1;display:flex;flex-direction:column;overflow:hidden;">
-        <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surface);">
-          <div class="flex items-center gap-3">
-            <h3 class="font-display font-bold" style="font-size:16px;">Live Threat Intelligence</h3>
-            <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:var(--font-mono);color:var(--primary);">
-              <span style="width:6px;height:6px;border-radius:50%;background:var(--primary);animation:pulseCritical 2s infinite;"></span>
-              LIVE
-            </span>
-          </div>
-          <div class="text-xs text-muted font-mono" id="tf-refresh-indicator">Auto-refresh: 60s</div>
-        </div>
-        <div style="flex:1;overflow:auto;">
-          <table class="table" id="threat-feed-table">
-            <thead style="position:sticky;top:0;z-index:10;">
-              <tr>
-                <th style="width:90px;">Severity</th>
-                <th>Title</th>
-                <th style="width:120px;">Source</th>
-                <th style="width:130px;">Category</th>
-                <th style="width:130px;">Published</th>
-                <th style="width:80px;"></th>
-              </tr>
-            </thead>
-            <tbody id="threat-feed-body">
-              <tr><td colspan="6" class="text-center text-muted">Loading threat intelligence...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-let threatFeedInterval = null;
-
-async function afterRenderGlobalThreatFeed() {
-  if (threatFeedInterval) clearInterval(threatFeedInterval);
-
-  async function fetchThreats() {
-    try {
-      const res = await api.get('/threat-feed');
-      const threats = res.data || [];
-      const tbody = document.getElementById('threat-feed-body');
-      if (!tbody) return;
-
-      const sevCritical = document.getElementById('tf-sev-critical')?.checked;
-      const sevHigh = document.getElementById('tf-sev-high')?.checked;
-      const sevMedium = document.getElementById('tf-sev-medium')?.checked;
-      const sevLow = document.getElementById('tf-sev-low')?.checked;
-      const sourceFilter = document.getElementById('tf-source-filter')?.value || '';
-
-      const filtered = threats.filter(t => {
-        const s = (t.severity || '').toLowerCase();
-        if (s === 'critical' && !sevCritical) return false;
-        if (s === 'high' && !sevHigh) return false;
-        if (s === 'medium' && !sevMedium) return false;
-        if (s === 'low' && !sevLow) return false;
-        if (sourceFilter && (t.source || '').toLowerCase() !== sourceFilter) return false;
-        return true;
-      });
-
-      if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No threats match current filters.</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = filtered.map(t => `
-        <tr style="${t.severity === 'critical' ? 'animation: pulseCritical 2s infinite;' : ''}">
-          <td><span class="badge-severity ${t.severity}" style="display:block;text-align:center;">[${(t.severity || 'N/A').toUpperCase().slice(0,4)}]</span></td>
-          <td class="font-semibold" style="font-size:13px;">${t.title || 'Untitled'}</td>
-          <td class="font-mono text-xs">${t.source || 'Unknown'}</td>
-          <td class="text-xs">${t.category || '—'}</td>
-          <td class="font-mono text-xs">${t.published ? new Date(t.published).toLocaleDateString() : '—'}</td>
-          <td><button class="btn btn-ghost" style="font-size:11px;padding:2px 6px;" onclick="showToast('Threat details: ${t.id}','info')">View</button></td>
-        </tr>
-      `).join('');
-
-      const indicator = document.getElementById('tf-refresh-indicator');
-      if (indicator) indicator.textContent = `Updated: ${new Date().toLocaleTimeString()} | ${filtered.length} items`;
-    } catch (e) {
-      const tbody = document.getElementById('threat-feed-body');
-      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Failed to load threat feed.</td></tr>';
-    }
-  }
-
-  await fetchThreats();
-  threatFeedInterval = setInterval(fetchThreats, 60000);
-}
-
-function filterThreatFeed() {
-  afterRenderGlobalThreatFeed();
-}
-
 // -------- BULK IMPORT FINDINGS --------
 let bulkImportEngagementId = null;
 
 function showBulkImportModal() {
-  const path = STITCH.currentRoute;
-  const match = path.match(/\/ledger\/([^\/]+)/);
-  if (!match) { showToast('No engagement selected', 'error'); return; }
-  bulkImportEngagementId = match[1];
+  if (!STITCH.currentEngagement?.id) { showToast('No engagement selected', 'error'); return; }
+  bulkImportEngagementId = STITCH.currentEngagement.id;
   
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -1728,13 +1284,116 @@ function showToast(message, type = 'info') {
   setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
+// -------- ROLES --------
+function isAdmin() {
+  return STITCH.user?.role === 'admin';
+}
+
+// -------- MODAL HELPER --------
+function openModal(id, title, bodyHtml, footerHtml) {
+  closeModal(id);
+  const overlay = document.createElement('div');
+  overlay.id = id;
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="card modal-panel">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-display font-bold">${title}</h3>
+        <button class="btn btn-ghost text-sm" onclick="closeModal('${id}')">&#10005;</button>
+      </div>
+      ${bodyHtml}
+      <div class="flex justify-end gap-2 mt-4">${footerHtml}</div>
+    </div>
+  `;
+  overlay.addEventListener('click', ev => { if (ev.target === overlay) closeModal(id); });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+// -------- ADMIN: NEW PROJECT --------
 function showNewEngagementModal() {
-  const name = prompt('Engagement name:');
-  if (!name) return;
-  const client = prompt('Client name:');
-  api.post('/engagements', { name, client_name: client, status: 'planning', methodology: 'owasp', scope: {included:[],excluded:[]}, timeline: {start_date:new Date().toISOString().slice(0,10),end_date:''}, team: [] })
-    .then(() => { showToast('Engagement created','success'); STITCH.render(); })
-    .catch(e => showToast(e.message,'error'));
+  if (!isAdmin()) { showToast('Only admins can create projects', 'error'); return; }
+  const today = new Date().toISOString().slice(0, 10);
+  openModal('new-engagement-overlay', 'New Project', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div style="grid-column:1/3;">
+        <label class="modal-label">Project Name *</label>
+        <input class="input w-full" id="ne-name" placeholder="e.g. Project Alpha - External Network">
+      </div>
+      <div style="grid-column:1/3;">
+        <label class="modal-label">Client Name *</label>
+        <input class="input w-full" id="ne-client" placeholder="e.g. Apex Financial">
+      </div>
+      <div>
+        <label class="modal-label">Methodology</label>
+        <select class="input w-full" id="ne-methodology">
+          <option value="owasp">OWASP</option>
+          <option value="ptes">PTES</option>
+          <option value="nist">NIST</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div>
+        <label class="modal-label">Status</label>
+        <select class="input w-full" id="ne-status">
+          <option value="planning">Planning</option>
+          <option value="in_progress">In Progress</option>
+          <option value="review">Review</option>
+        </select>
+      </div>
+      <div>
+        <label class="modal-label">Start Date</label>
+        <input type="date" class="input w-full" id="ne-start" value="${today}">
+      </div>
+      <div>
+        <label class="modal-label">End Date</label>
+        <input type="date" class="input w-full" id="ne-end">
+      </div>
+      <div style="grid-column:1/3;">
+        <label class="modal-label">In-Scope Targets</label>
+        <textarea class="input w-full" id="ne-scope" rows="3" placeholder="One per line, e.g. 10.0.0.0/24" style="resize:vertical;font-family:var(--font-mono);font-size:12px;"></textarea>
+      </div>
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="closeModal('new-engagement-overlay')">Cancel</button>
+    <button class="btn btn-primary" onclick="createEngagement()">Create Project</button>
+  `);
+  setTimeout(() => document.getElementById('ne-name')?.focus(), 50);
+}
+
+async function createEngagement() {
+  const name = document.getElementById('ne-name').value.trim();
+  const client = document.getElementById('ne-client').value.trim();
+  if (!name || !client) { showToast('Project name and client are required', 'error'); return; }
+  if (isXSSAttempt(name) || isXSSAttempt(client)) { showToast('Invalid input detected', 'error'); return; }
+
+  const scopeRaw = document.getElementById('ne-scope').value || '';
+  const included = scopeRaw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+
+  try {
+    await api.post('/engagements', {
+      name,
+      client_name: client,
+      status: document.getElementById('ne-status').value,
+      methodology: document.getElementById('ne-methodology').value,
+      scope: { included, excluded: [] },
+      timeline: {
+        start_date: document.getElementById('ne-start').value,
+        end_date: document.getElementById('ne-end').value
+      },
+      team: []
+    });
+    closeModal('new-engagement-overlay');
+    showToast('Project created', 'success');
+    STITCH.render();
+  } catch (e) {
+    showToast(e.message || 'Failed to create project', 'error');
+  }
 }
 
 function insertPocImage(input) {
@@ -1766,7 +1425,7 @@ function renderUserManagement() {
     <div>
       <div class="flex items-center justify-between mb-6">
         <h3 class="font-display font-bold">Team Members</h3>
-        <button class="btn btn-primary" onclick="showInviteUserModal()">+ Invite User</button>
+        ${isAdmin() ? `<button class="btn btn-primary" onclick="showInviteUserModal()">+ Add User</button>` : ''}
       </div>
       <div class="card" id="user-management-table">
         <table class="table">
@@ -1820,23 +1479,71 @@ async function afterRenderUserManagement() {
   }
 }
 
+const MIN_PASSWORD_LENGTH = 8;
+
 function showInviteUserModal() {
-  const name = prompt('Full name:');
-  if (!name) return;
-  const email = prompt('Email (must be @cyberteq.io):');
-  if (!email) return;
-  if (!email.endsWith('@cyberteq.io')) {
-    showToast('Only @cyberteq.io emails are allowed', 'error');
+  if (!isAdmin()) { showToast('Only admins can add users', 'error'); return; }
+  openModal('invite-user-overlay', 'Add User', `
+    <div class="flex flex-col gap-3">
+      <div>
+        <label class="modal-label">Full Name *</label>
+        <input class="input w-full" id="iu-name" placeholder="e.g. Sarah Jenkins">
+      </div>
+      <div>
+        <label class="modal-label">Email *</label>
+        <input type="email" class="input w-full" id="iu-email" placeholder="you@example.com">
+      </div>
+      <div>
+        <label class="modal-label">Role *</label>
+        <select class="input w-full" id="iu-role">
+          <option value="analyst">Analyst</option>
+          <option value="user">User</option>
+          <option value="client">Client</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:4px 0;">
+      <div>
+        <label class="modal-label">Password *</label>
+        <input type="password" class="input w-full" id="iu-password" autocomplete="new-password" placeholder="At least ${MIN_PASSWORD_LENGTH} characters">
+      </div>
+      <div>
+        <label class="modal-label">Confirm Password *</label>
+        <input type="password" class="input w-full" id="iu-password2" autocomplete="new-password" placeholder="Re-enter password">
+      </div>
+      <p class="text-xs text-muted">Share these credentials with the user directly. They should change the password after first sign-in.</p>
+    </div>
+  `, `
+    <button class="btn btn-ghost" onclick="closeModal('invite-user-overlay')">Cancel</button>
+    <button class="btn btn-primary" onclick="createUser()">Add User</button>
+  `);
+  setTimeout(() => document.getElementById('iu-name')?.focus(), 50);
+}
+
+async function createUser() {
+  const name = document.getElementById('iu-name').value.trim();
+  const email = document.getElementById('iu-email').value.trim();
+  const role = document.getElementById('iu-role').value;
+  const password = document.getElementById('iu-password').value;
+  const confirm = document.getElementById('iu-password2').value;
+
+  if (!name) { showToast('Full name is required', 'error'); return; }
+  if (isXSSAttempt(name)) { showToast('Invalid input detected', 'error'); return; }
+  if (!validateEmail(email)) { showToast('Enter a valid email address', 'error'); return; }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    showToast(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`, 'error');
     return;
   }
-  const role = prompt('Role (admin, analyst, or user):');
-  if (!role || !['admin','analyst','user'].includes(role)) {
-    showToast('Invalid role', 'error');
-    return;
+  if (password !== confirm) { showToast('Passwords do not match', 'error'); return; }
+
+  try {
+    await api.post('/users', { name, email, role, password });
+    closeModal('invite-user-overlay');
+    showToast('User added', 'success');
+    STITCH.render();
+  } catch (e) {
+    showToast(e.message || 'Failed to add user', 'error');
   }
-  api.post('/users', { name, email, role })
-    .then(() => { showToast('User invited successfully', 'success'); STITCH.render(); })
-    .catch(e => showToast(e.message, 'error'));
 }
 
 async function deleteUser(userId) {
@@ -1863,17 +1570,8 @@ function afterRender(path) {
     case path === '/evidence':
       setTimeout(afterRenderEvidenceVault, 50);
       break;
-    case path === '/insight/dashboard':
-      setTimeout(afterRenderInsightDashboard, 50);
-      break;
-    case path === '/insight/projects':
-      setTimeout(afterRenderAuditProjects, 50);
-      break;
-    case path === '/insight/analyzer':
-      setTimeout(afterRenderFindingAnalyzer, 50);
-      break;
-    case path === '/command/dashboard':
-      setTimeout(afterRenderGlobalThreatDashboard, 50);
+    case path === '/finding-detail':
+      setTimeout(afterRenderFindingDetail, 50);
       break;
     case path === '/command/engagements':
       setTimeout(afterRenderActiveEngagements, 50);
@@ -1883,9 +1581,6 @@ function afterRender(path) {
       break;
     case path === '/command/report-builder':
       setTimeout(afterRenderCommandReportBuilder, 50);
-      break;
-    case path === '/command/threat-feed':
-      setTimeout(afterRenderGlobalThreatFeed, 50);
       break;
     case path === '/admin/users':
       setTimeout(afterRenderUserManagement, 50);

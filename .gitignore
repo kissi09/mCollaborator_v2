@@ -1,0 +1,26 @@
+# Build artifacts
+*.exe
+*.exe~
+backend/stitch.exe
+backend/stitch.exe~
+
+# Generated reports — client deliverables, never commit these.
+# They can contain real vulnerability findings and client names.
+backend/backend/reports/
+backend/reports/
+*.docx.tmp
+
+# Logs
+*.log
+stitch-out.log
+stitch-err.log
+
+# OS / cloud-sync noise
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp

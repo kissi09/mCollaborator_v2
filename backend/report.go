@@ -8,10 +8,10 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"html"
 	"strings"
 	"time"
 
@@ -20,22 +20,22 @@ import (
 )
 
 type ReportConfig struct {
-	CompanyName     string          `json:"company_name"`      // Client company name (replaces "Company's Name")
-	CompanyLogo     string          `json:"company_logo"`      // Client logo (base64) shown top-left in header
-	EngagementName  string          `json:"engagement_name"`   // e.g. "VAPT Report"
+	CompanyName     string          `json:"company_name"`    // Client company name (replaces "Company's Name")
+	CompanyLogo     string          `json:"company_logo"`    // Client logo (base64) shown top-left in header
+	EngagementName  string          `json:"engagement_name"` // e.g. "VAPT Report"
 	ClientEmail     string          `json:"client_email"`
-	RefNumber       string          `json:"ref_number"`        // e.g. GH-REP-035-26059-01
-	AssessmentStart string          `json:"assessment_start"`  // e.g. "17th June 2026"
-	AssessmentEnd   string          `json:"assessment_end"`    // e.g. "24th June 2026"
+	RefNumber       string          `json:"ref_number"`       // e.g. GH-REP-035-26059-01
+	AssessmentStart string          `json:"assessment_start"` // e.g. "17th June 2026"
+	AssessmentEnd   string          `json:"assessment_end"`   // e.g. "24th June 2026"
 	TesterName      string          `json:"tester_name"`
 	ApproverName    string          `json:"approver_name"`
 	ApproverTitle   string          `json:"approver_title"`
 	VersionLabel    string          `json:"version_label"`
-	Introduction    string          `json:"introduction"`      // Custom exec summary intro (optional)
+	Introduction    string          `json:"introduction"` // Custom exec summary intro (optional)
 	Scope           []string        `json:"scope"`
 	OutOfScope      []string        `json:"out_of_scope"`
-	Sections        []string        `json:"sections"`          // wpt, ept, ipt, nar
-	TestCases       []TestCaseGroup `json:"test_cases"`        // Web app test case table
+	Sections        []string        `json:"sections"`   // wpt, ept, ipt, nar
+	TestCases       []TestCaseGroup `json:"test_cases"` // Web app test case table
 	Findings        []ReportFinding `json:"findings"`
 	Tools           []string        `json:"tools"`
 }
@@ -60,9 +60,9 @@ type ReportFinding struct {
 	AffectedSystem string `json:"affected_system"`
 	POC            string `json:"poc"`
 	Recommendation string `json:"recommendation"`
-	Category       string `json:"category"`     // web, external, internal, architecture
-	Exposure       string `json:"exposure"`     // Web, External, Internal, etc.
-	VulnID         string `json:"vuln_id"`      // REC1_WPT1 etc. (auto-generated if empty)
+	Category       string `json:"category"` // web, external, internal, architecture
+	Exposure       string `json:"exposure"` // Web, External, Internal, etc.
+	VulnID         string `json:"vuln_id"`  // REC1_WPT1 etc. (auto-generated if empty)
 }
 
 type exportReportResponse struct {
@@ -190,13 +190,18 @@ func HandleExportReport(store *Store) http.HandlerFunc {
 			return
 		}
 
-		pdfURL, err := GeneratePDF(config, pdfPath)
+		// Preferred path: lay the merged DOCX out with a real Word engine so the
+		// PDF is the template, not an approximation of it. Only if no engine is
+		// installed do we fall back to the hand-drawn gofpdf rendering, which is
+		// readable but does not match the template.
+		pdfURL, engine, err := generatePDFFromDOCX(config, docxPath, pdfPath)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ApiResponse{
 				Error: &ApiError{Code: "PDF_GENERATION_FAILED", Message: fmt.Sprintf("Failed to generate PDF: %s", err.Error())},
 			})
 			return
 		}
+		log.Printf("report: generated %s (pdf engine: %s)", baseName, engine)
 
 		// Best-effort audit log (may not have user if unauthenticated)
 		if user, ok := r.Context().Value(userContextKey).(*User); ok && user != nil {
@@ -236,11 +241,7 @@ func HandleDownloadReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileExt := "." + reportType
-	if reportType == "docx" {
-		fileExt = ".html"
-	}
-	filePath := filepath.Join(reportsDir, reportName+fileExt)
+	filePath := filepath.Join(reportsDir, reportName+"."+reportType)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		http.Error(w, "Report not found", http.StatusNotFound)
 		return
@@ -249,7 +250,7 @@ func HandleDownloadReport(w http.ResponseWriter, r *http.Request) {
 	if reportType == "pdf" {
 		w.Header().Set("Content-Type", "application/pdf")
 	} else if reportType == "docx" {
-		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.%s", reportName, reportType))
 	http.ServeFile(w, r, filePath)
@@ -450,317 +451,32 @@ var defaultTools = []string{
 // DOCX (Word-compatible HTML) generation
 // ============================================================================
 
+// generatePDFFromDOCX converts the already-merged DOCX to PDF with a real Word
+// layout engine. If none is installed it falls back to the legacy hand-drawn
+// renderer so exports keep working, and reports which engine was used.
+func generatePDFFromDOCX(config ReportConfig, docxPath, pdfPath string) (url, engine string, err error) {
+	engine, convErr := convertDOCXToPDF(docxPath, pdfPath)
+	if convErr == nil {
+		return "/api/v1/reports/download/pdf/" + strings.TrimSuffix(filepath.Base(pdfPath), ".pdf"), engine, nil
+	}
+
+	log.Printf("report: template-accurate PDF unavailable (%v); falling back to gofpdf", convErr)
+	url, err = GeneratePDF(config, pdfPath)
+	if err != nil {
+		return "", "", err
+	}
+	return url, "gofpdf-fallback", nil
+}
+
 func GenerateDOCX(config ReportConfig, outputPath string) (string, error) {
-	htmlPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".html"
-
-	esc := html.EscapeString
-	nowDate := strings.ToUpper(time.Now().Format("02-Jan-2006"))
-	var sb strings.Builder
-
-	// ---- Word HTML preamble ---------------------------------------------
-	sb.WriteString("<html xmlns:o='urn:schemas-microsoft-com:office:office' ")
-	sb.WriteString("xmlns:w='urn:schemas-microsoft-com:office:word' ")
-	sb.WriteString("xmlns='http://www.w3.org/TR/REC-html40'>")
-	sb.WriteString("<head><meta charset='utf-8'>")
-	sb.WriteString("<title>" + esc(config.EngagementName) + " - " + esc(config.CompanyName) + "</title>")
-	sb.WriteString("<style>")
-	sb.WriteString("body{font-family:Calibri,Arial,sans-serif;color:#333;font-size:11pt;line-height:1.4;}")
-	sb.WriteString("h1{color:" + brandOrange + ";font-size:20pt;margin-top:24px;}")
-	sb.WriteString("h2{color:" + brandOrange + ";font-size:16pt;margin-top:18px;}")
-	sb.WriteString("h3{color:" + brandOrange + ";font-size:13pt;margin-top:14px;}")
-	sb.WriteString("h4{color:" + brandOrange + ";font-size:12pt;margin-top:12px;}")
-	sb.WriteString("p{margin:6px 0;}")
-	sb.WriteString("table{border-collapse:collapse;width:100%;margin:10px 0;}")
-	sb.WriteString("th,td{border:1px solid #E0A96D;padding:6px 8px;text-align:left;vertical-align:top;font-size:10.5pt;}")
-	sb.WriteString("th{background:" + brandOrange + ";color:#fff;font-weight:bold;}")
-	sb.WriteString("td{background:#FDEEE0;}")
-	sb.WriteString(".hdr{background:" + brandOrange + ";color:#fff;font-weight:bold;}")
-	sb.WriteString(".badge{color:#fff;padding:2px 10px;border-radius:3px;font-weight:bold;display:inline-block;}")
-	sb.WriteString(".pagebreak{page-break-before:always;}")
-	sb.WriteString("ul{margin:6px 0 6px 18px;}")
-	sb.WriteString("li{margin:3px 0;}")
-	sb.WriteString(".toc td{background:#fff;border:none;padding:2px 8px;}")
-	sb.WriteString(".poc{background:#f5f5f5;border:1px solid #ddd;padding:8px;font-family:Consolas,monospace;white-space:pre-wrap;}")
-	sb.WriteString("</style></head><body>")
-
-	// ---- COVER PAGE ------------------------------------------------------
-	sb.WriteString("<div style='background:" + brandOrange + ";width:100%;height:120px;margin:0;padding:0;'>")
-	if config.CompanyLogo != "" {
-		sb.WriteString(fmt.Sprintf("<img src='data:image/png;base64,%s' style='max-height:90px;max-width:220px;margin:15px;'>", config.CompanyLogo))
+	docxBytes, err := mergeVAPTDocx(config)
+	if err != nil {
+		return "", fmt.Errorf("failed to render DOCX from template: %w", err)
 	}
-	sb.WriteString("</div>")
-	sb.WriteString("<div style='margin-top:80px;'>")
-	sb.WriteString("<h1 style='font-size:34pt;color:" + brandOrange + ";'>IT SECURITY CONSULTANCY</h1>")
-	sb.WriteString(fmt.Sprintf("<p style='font-size:16pt;color:#444;'>%s &ndash; Vulnerability Assessment &amp; Penetration Testing (VAPT) POC</p>",
-		esc(config.CompanyName)))
-	sb.WriteString("</div>")
-
-	// version table
-	versionLabel := config.VersionLabel
-	if strings.TrimSpace(versionLabel) == "" {
-		versionLabel = "Details to be Provided"
+	if err := os.WriteFile(outputPath, docxBytes, 0644); err != nil {
+		return "", fmt.Errorf("failed to write DOCX report: %w", err)
 	}
-	sb.WriteString("<table style='margin-top:60px;'>")
-	sb.WriteString("<tr><th>Version</th><th>Date</th><th>Authors</th><th>Approver</th></tr>")
-	sb.WriteString("<tr>")
-	sb.WriteString("<td>" + esc(versionLabel) + "</td>")
-	sb.WriteString("<td>" + esc(nowDate) + "</td>")
-	sb.WriteString("<td>" + esc(config.TesterName) + "<br>Cybersecurity Expert</td>")
-	sb.WriteString("<td>" + esc(config.ApproverName) + "<br>" + esc(config.ApproverTitle) + "</td>")
-	sb.WriteString("</tr></table>")
-
-	// ---- TABLE OF CONTENTS ----------------------------------------------
-	sb.WriteString("<div class='pagebreak'></div>")
-	sb.WriteString("<h1>CONTENTS</h1>")
-	tocEntries := []string{
-		"1 Executive Summary",
-		"&nbsp;&nbsp;&nbsp;1.1 Introduction",
-		"&nbsp;&nbsp;&nbsp;1.2 Findings and Recommendations",
-		"&nbsp;&nbsp;&nbsp;1.3 Risk Assessment and Impact on Business",
-		"2 Methodology and Scope",
-		"&nbsp;&nbsp;&nbsp;2.1 Cyberteq Security Assessment Methodology",
-		"&nbsp;&nbsp;&nbsp;2.2 Cyberteq Vulnerability Rating Guide",
-		"&nbsp;&nbsp;&nbsp;2.3 Scope",
-		"&nbsp;&nbsp;&nbsp;2.4 Out of Scope",
-		"&nbsp;&nbsp;&nbsp;2.5 Testing Methodologies",
-		"&nbsp;&nbsp;&nbsp;2.6 Test Cases",
-		"3 Findings and Recommendations",
-		"&nbsp;&nbsp;&nbsp;3.1 Recommendations Naming Convention",
-		"&nbsp;&nbsp;&nbsp;3.2 Vulnerability Register",
-		"4 Tools and Licenses",
-	}
-	sb.WriteString("<table class='toc'>")
-	for _, e := range tocEntries {
-		sb.WriteString("<tr><td>" + e + "</td></tr>")
-	}
-	sb.WriteString("</table>")
-
-	// ---- 1 EXECUTIVE SUMMARY --------------------------------------------
-	sb.WriteString("<div class='pagebreak'></div>")
-	sb.WriteString("<h1>1 Executive Summary</h1>")
-
-	sb.WriteString("<h2>1.1 Introduction</h2>")
-	sb.WriteString("<p>" + esc(defaultIntroduction(config)) + "</p>")
-	for _, para := range introBoilerplate {
-		sb.WriteString("<p>" + esc(para) + "</p>")
-	}
-
-	total := len(config.Findings)
-	sb.WriteString("<h2>1.2 Findings and Recommendations</h2>")
-	sb.WriteString(fmt.Sprintf("<p>During the security assessment of %s's infrastructure, %d issues of different "+
-		"severity levels have been discovered, categorized, and reported upon. The following section summarizes the "+
-		"distribution of the identified findings by their severity level.</p>", esc(config.CompanyName), total))
-
-	sb.WriteString("<h3>1.2.1 Findings by Severity</h3>")
-	counts := vaptCountBySeverity(config.Findings)
-	sb.WriteString("<table><tr><th>Severity</th><th>Count</th></tr>")
-	for _, sev := range []string{"Critical", "High", "Medium", "Low", "Informational"} {
-		bg := vaptSeverityHex(sev)
-		fg := vaptSeverityTextHex(sev)
-		bar := strings.Repeat("&#9608;", counts[sev])
-		sb.WriteString("<tr>")
-		sb.WriteString(fmt.Sprintf("<td><span class='badge' style='background:%s;color:%s;'>%s</span></td>", bg, fg, sev))
-		sb.WriteString(fmt.Sprintf("<td>%d &nbsp;<span style='color:%s;'>%s</span></td>", counts[sev], bg, bar))
-		sb.WriteString("</tr>")
-	}
-	sb.WriteString("</table>")
-
-	sb.WriteString("<h2>1.3 Risk Assessment and Impact on Business</h2>")
-	sb.WriteString(fmt.Sprintf("<p>The vulnerabilities identified during this assessment pose varying levels of risk "+
-		"to %s. If left unremediated, these findings could be leveraged by malicious actors to compromise the "+
-		"confidentiality, integrity, and availability of the organization's information assets, potentially resulting "+
-		"in financial loss, reputational damage, and regulatory non-compliance. Cyberteq recommends prioritizing "+
-		"remediation efforts according to the criticality of each finding described in this report.</p>", esc(config.CompanyName)))
-
-	// ---- 2 METHODOLOGY AND SCOPE ----------------------------------------
-	sb.WriteString("<div class='pagebreak'></div>")
-	sb.WriteString("<h1>2 Methodology and Scope</h1>")
-
-	sb.WriteString("<h2>2.1 Cyberteq Security Assessment Methodology</h2>")
-	sb.WriteString("<p>Cyberteq follows a structured, phased methodology to ensure comprehensive coverage during the " +
-		"security assessment. The assessment is divided into the following four phases:</p>")
-	for i, ph := range methodologyPhases {
-		sb.WriteString(fmt.Sprintf("<h3>2.1.%d %s</h3>", i+1, esc(ph[0])))
-		sb.WriteString("<p>" + esc(ph[1]) + "</p>")
-	}
-
-	sb.WriteString("<h2>2.2 Cyberteq Vulnerability Rating Guide</h2>")
-	sb.WriteString("<p>Cyberteq rates the severity of each identified vulnerability using the Common Vulnerability " +
-		"Scoring System (CVSS) version 3.1. The following metrics are considered when calculating the overall " +
-		"severity of a finding:</p>")
-	sb.WriteString("<ol>")
-	for _, m := range ratingMetrics {
-		sb.WriteString("<li>" + esc(m) + "</li>")
-	}
-	sb.WriteString("</ol>")
-
-	sb.WriteString("<h2>2.3 Scope</h2>")
-	sb.WriteString("<p>" + esc(fmt.Sprintf(scopeParagraph, config.AssessmentStart, config.AssessmentEnd)) + "</p>")
-	sb.WriteString("<table><tr><th>Activity</th><th>Details</th></tr>")
-	if len(config.Scope) > 0 {
-		for _, s := range config.Scope {
-			sb.WriteString("<tr><td>" + esc(s) + "</td><td>All activities were performed remotely.</td></tr>")
-		}
-	} else {
-		sb.WriteString("<tr><td>Web Application Testing</td><td>All activities were performed remotely.</td></tr>")
-	}
-	sb.WriteString("</table>")
-
-	sb.WriteString("<h2>2.4 Out of Scope</h2>")
-	sb.WriteString("<ul>")
-	if len(config.OutOfScope) > 0 {
-		for _, s := range config.OutOfScope {
-			sb.WriteString("<li>" + esc(s) + "</li>")
-		}
-	} else {
-		for _, s := range outOfScopeDefaults {
-			sb.WriteString("<li><strong>" + esc(s[0]) + ":</strong> " + esc(s[1]) + "</li>")
-		}
-	}
-	sb.WriteString("</ul>")
-
-	sb.WriteString("<h2>2.5 Testing Methodologies</h2>")
-	sb.WriteString("<h3>2.5.1 Web Application Testing Methodology</h3>")
-	sb.WriteString("<p>The web application testing was conducted in accordance with the OWASP Testing Guide, focusing " +
-		"on the most critical web application security risks. The following categories were assessed:</p>")
-	sb.WriteString("<ul>")
-	for _, m := range owaspMethodologyList {
-		sb.WriteString("<li>" + esc(m) + "</li>")
-	}
-	sb.WriteString("</ul>")
-
-	sb.WriteString("<h2>2.6 Test Cases</h2>")
-	sb.WriteString("<h3>2.6.1 Web Application Testing</h3>")
-	if len(config.TestCases) > 0 {
-		sb.WriteString("<table><tr><th>Test Type</th><th>Status</th></tr>")
-		for _, grp := range config.TestCases {
-			sb.WriteString(fmt.Sprintf("<tr><td colspan='2' style='background:#DDDDDD;color:#000;font-weight:bold;'>%s</td></tr>", esc(grp.Group)))
-			for _, c := range grp.Cases {
-				statusColor := "#6C757D"
-				switch strings.ToLower(strings.TrimSpace(c.Status)) {
-				case "pass":
-					statusColor = "#28A745"
-				case "issues":
-					statusColor = "#DC3545"
-				}
-				sb.WriteString("<tr>")
-				sb.WriteString("<td>" + esc(c.Name) + "</td>")
-				sb.WriteString(fmt.Sprintf("<td><span style='color:%s;font-weight:bold;'>%s</span></td>", statusColor, esc(c.Status)))
-				sb.WriteString("</tr>")
-			}
-		}
-		sb.WriteString("</table>")
-	}
-
-	// ---- 3 FINDINGS AND RECOMMENDATIONS ---------------------------------
-	sb.WriteString("<div class='pagebreak'></div>")
-	sb.WriteString("<h1>3 Findings and Recommendations</h1>")
-	sb.WriteString("<p>This section presents the findings identified during the security assessment along with their " +
-		"associated risk criticality and recommended remediation actions. The criticality of each finding is " +
-		"classified according to the following criteria:</p>")
-	sb.WriteString("<table><tr><th>Criticality</th><th>Description</th></tr>")
-	for _, c := range criticalityCriteria {
-		fg := "#fff"
-		if c[0] == "Medium" {
-			fg = "#000"
-		}
-		sb.WriteString("<tr>")
-		sb.WriteString(fmt.Sprintf("<td><span class='badge' style='background:%s;color:%s;'>%s</span></td>", c[1], fg, c[0]))
-		sb.WriteString("<td>" + esc(c[2]) + "</td>")
-		sb.WriteString("</tr>")
-	}
-	sb.WriteString("</table>")
-
-	sb.WriteString("<h2>3.1 Recommendations Naming Convention</h2>")
-	sb.WriteString("<table><tr><th>Abbreviation</th><th>Meaning</th></tr>")
-	for _, n := range namingConvention {
-		sb.WriteString("<tr><td>" + esc(n[0]) + "</td><td>" + esc(n[1]) + "</td></tr>")
-	}
-	sb.WriteString("</table>")
-	sb.WriteString("<p>For example, <strong>REC3_WPT3</strong> refers to the 3rd recommendation for the 3rd finding " +
-		"from web penetration testing.</p>")
-
-	sb.WriteString("<h2>3.2 Vulnerability Register</h2>")
-	sb.WriteString("<table>")
-	sb.WriteString("<tr><th>Vulnerability</th><th>Exposure</th><th>Criticality</th><th>Vulnerability ID</th><th>Recommendation</th></tr>")
-	for i, f := range config.Findings {
-		id := vulnID(f, i+1)
-		bg := vaptSeverityHex(f.Severity)
-		fg := vaptSeverityTextHex(f.Severity)
-		sb.WriteString("<tr>")
-		sb.WriteString("<td>" + esc(f.Title) + "</td>")
-		sb.WriteString("<td>" + esc(exposureOf(f)) + "</td>")
-		sb.WriteString(fmt.Sprintf("<td><span class='badge' style='background:%s;color:%s;'>%s</span></td>", bg, fg, severityDisplay(f.Severity)))
-		sb.WriteString("<td>" + esc(id) + "</td>")
-		sb.WriteString("<td>" + esc(truncateText(f.Recommendation, 120)) + "</td>")
-		sb.WriteString("</tr>")
-	}
-	sb.WriteString("</table>")
-
-	// per-finding detail blocks
-	for i, f := range config.Findings {
-		id := vulnID(f, i+1)
-		bg := vaptSeverityHex(f.Severity)
-		fg := vaptSeverityTextHex(f.Severity)
-		sb.WriteString(fmt.Sprintf("<h3>3.2.%d %s</h3>", i+1, esc(f.Title)))
-		sb.WriteString("<table>")
-		// Description header + row with rating
-		sb.WriteString("<tr><td class='hdr' colspan='2'>Description</td></tr>")
-		sb.WriteString("<tr>")
-		sb.WriteString("<td style='width:75%;'>" + esc(f.Description) + "</td>")
-		sb.WriteString(fmt.Sprintf("<td style='width:25%%;'>Rating: <span class='badge' style='background:%s;color:%s;'>%s</span></td>", bg, fg, severityDisplay(f.Severity)))
-		sb.WriteString("</tr>")
-		// CVSS Vector
-		sb.WriteString("<tr><td class='hdr' colspan='2'>CVSS Vector String</td></tr>")
-		sb.WriteString("<tr><td colspan='2'>" + esc(f.CVSSVector) + "</td></tr>")
-		// Impact
-		sb.WriteString("<tr><td class='hdr' colspan='2'>Impact</td></tr>")
-		sb.WriteString("<tr><td colspan='2'>" + esc(f.Impact) + "</td></tr>")
-		// Affected Application
-		sb.WriteString("<tr><td class='hdr' colspan='2'>Affected Application</td></tr>")
-		sb.WriteString("<tr><td colspan='2'>" + esc(f.AffectedSystem) + "</td></tr>")
-		// PoC - raw HTML (may contain <img>)
-		sb.WriteString("<tr><td class='hdr' colspan='2'>PoC</td></tr>")
-		sb.WriteString("<tr><td colspan='2'><div class='poc'>" + f.POC + "</div></td></tr>")
-		// Recommendation
-		sb.WriteString("<tr><td class='hdr' colspan='2'>Recommendation</td></tr>")
-		sb.WriteString("<tr><td colspan='2'>" + esc(id) + "&ndash; " + esc(f.Recommendation) + "</td></tr>")
-		sb.WriteString("</table>")
-	}
-
-	// ---- 4 TOOLS AND LICENSES -------------------------------------------
-	sb.WriteString("<div class='pagebreak'></div>")
-	sb.WriteString("<h1>4 Tools and Licenses</h1>")
-	sb.WriteString("<p>Cyberteq testers used below tools in the Vulnerability Assessment:</p>")
-	sb.WriteString("<ul>")
-	tools := config.Tools
-	if len(tools) == 0 {
-		tools = defaultTools
-	}
-	for _, t := range tools {
-		sb.WriteString("<li>" + esc(t) + "</li>")
-	}
-	sb.WriteString("</ul>")
-
-	// ---- Footer note -----------------------------------------------------
-	sb.WriteString("<hr style='margin-top:40px;border:none;border-top:1px solid " + brandOrange + ";'>")
-	sb.WriteString("<table style='margin-top:8px;'><tr>")
-	sb.WriteString("<td style='background:#fff;border:none;'>Cyberteq Falcon Ltd.</td>")
-	sb.WriteString("<td style='background:#fff;border:none;text-align:center;'>" + esc(config.EngagementName) + " &ndash; " + esc(config.CompanyName) + "</td>")
-	sb.WriteString("<td style='background:#fff;border:none;text-align:right;'>Ref: " + esc(config.RefNumber) + "</td>")
-	sb.WriteString("</tr><tr>")
-	sb.WriteString("<td style='background:#fff;border:none;'>All rights reserved</td>")
-	sb.WriteString("<td style='background:#fff;border:none;'></td>")
-	sb.WriteString("<td style='background:#fff;border:none;'></td>")
-	sb.WriteString("</tr></table>")
-
-	sb.WriteString("</body></html>")
-
-	if err := os.WriteFile(htmlPath, []byte(sb.String()), 0644); err != nil {
-		return "", fmt.Errorf("failed to write HTML report: %w", err)
-	}
-
-	return "/api/v1/reports/download/docx/" + strings.TrimSuffix(filepath.Base(htmlPath), ".html"), nil
+	return "/api/v1/reports/download/docx/" + strings.TrimSuffix(filepath.Base(outputPath), ".docx"), nil
 }
 
 // ============================================================================

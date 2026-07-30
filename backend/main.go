@@ -95,9 +95,6 @@ func main() {
 		// Reports (with document generation) — no auth required for export/download
 		r.Post("/reports/export", HandleExportReport(store))
 		r.Get("/reports/download/{type}/{name}", HandleDownloadReport)
-
-		// Threat Feed
-		r.Get("/threat-feed", HandleThreatFeed)
 	})
 
 	// Health check
@@ -137,7 +134,6 @@ func main() {
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("mCollaborator server starting on http://localhost%s", addr)
-	log.Printf("Login credentials: admin@cyberteq.io / admin123")
 	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatal(err)
 	}

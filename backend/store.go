@@ -50,6 +50,15 @@ func NewStore() *Store {
 func (s *Store) seed() {
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Demo dates are relative to today so the dashboard's active / recently
+	// completed split stays meaningful however long after seeding it is viewed.
+	day := func(offset int) string {
+		return time.Now().UTC().AddDate(0, 0, offset).Format("2006-01-02")
+	}
+	ts := func(offset int) string {
+		return time.Now().UTC().AddDate(0, 0, offset).Format(time.RFC3339)
+	}
+
 	orgID := "org_001"
 	s.orgs[orgID] = &Org{ID: orgID, Name: "Cyberteq Falcon", Slug: "cyberteq-falcon", CreatedAt: now, UpdatedAt: now}
 
@@ -58,21 +67,21 @@ func (s *Store) seed() {
 	legacyHash := hashPassword("admin123")
 	userID := "usr_001"
 	s.users[userID] = &User{
-		ID: userID, OrgID: orgID, Email: "admin@cyberteq.io", Name: "Admin User",
+		ID: userID, OrgID: orgID, Email: "admin@cyberteq.com", Name: "Admin User",
 		PasswordHash: passwordHash, Role: "admin", MFAEnabled: false,
 		Permissions: []string{"finding:write", "vault:read", "vault:write", "report:export", "admin:users", "engagements:write"},
 		CreatedAt: now,
 	}
-	s.usersByEmail["admin@cyberteq.io"] = s.users[userID]
+	s.usersByEmail["admin@cyberteq.com"] = s.users[userID]
 
 	userID2 := "usr_002"
 	s.users[userID2] = &User{
-		ID: userID2, OrgID: orgID, Email: "analyst@cyberteq.io", Name: "Sarah Jenkins",
+		ID: userID2, OrgID: orgID, Email: "analyst@cyberteq.com", Name: "Sarah Jenkins",
 		PasswordHash: legacyHash, Role: "analyst", MFAEnabled: false,
 		Permissions: []string{"finding:write", "vault:read", "vault:write", "report:export"},
 		CreatedAt: now,
 	}
-	s.usersByEmail["analyst@cyberteq.io"] = s.users[userID2]
+	s.usersByEmail["analyst@cyberteq.com"] = s.users[userID2]
 
 	userID3 := "usr_003"
 	s.users[userID3] = &User{
@@ -91,7 +100,7 @@ func (s *Store) seed() {
 			Included: []string{"10.0.0.0/24", "api.apex.example.com"},
 			Excluded: []string{"10.0.0.100"},
 		},
-		Timeline: Timeline{StartDate: "2025-10-01", EndDate: "2025-10-31"},
+		Timeline: Timeline{StartDate: day(-20), EndDate: day(10)},
 		Team: []string{userID, userID2}, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
 
@@ -102,30 +111,42 @@ func (s *Store) seed() {
 		Scope: EngagementScope{
 			Included: []string{"api.internal.cyberteq.com/v2/*"},
 		},
-		Timeline: Timeline{StartDate: "2025-10-15", EndDate: "2025-11-15"},
+		Timeline: Timeline{StartDate: day(-45), EndDate: day(5)},
 		Team: []string{userID, userID2}, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
 
 	engID3 := "eng_003"
 	s.engagements[engID3] = &Engagement{
-		ID: engID3, OrgID: orgID, Name: "Cloud Infrastructure Audit",
-		ClientName: "Globex Corp", Status: "planning", Methodology: "nist",
+		ID: engID3, OrgID: orgID, Name: "Cloud Red Team Engagement",
+		ClientName: "Globex Corp", Status: "planning", Methodology: "ptes",
 		Scope: EngagementScope{
 			Included: []string{"aws:prod/account-123456"},
 		},
-		Timeline: Timeline{StartDate: "2025-11-01", EndDate: "2025-12-15"},
+		Timeline: Timeline{StartDate: day(7), EndDate: day(52)},
 		Team: []string{userID}, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
 
 	engID4 := "eng_004"
 	s.engagements[engID4] = &Engagement{
-		ID: engID4, OrgID: orgID, Name: "Q3 Compliance Audit",
-		ClientName: "FinCorp Ltd.", Status: "closed", Methodology: "custom",
+		ID: engID4, OrgID: orgID, Name: "Web App Penetration Test - Q3",
+		ClientName: "FinCorp Ltd.", Status: "closed", Methodology: "owasp",
 		Scope: EngagementScope{
 			Included: []string{"10.20.0.0/16"},
 		},
-		Timeline: Timeline{StartDate: "2025-07-01", EndDate: "2025-09-30"},
-		Team: []string{userID2}, CreatedBy: userID2, CreatedAt: "2025-07-01T00:00:00Z", UpdatedAt: "2025-09-30T00:00:00Z",
+		Timeline: Timeline{StartDate: day(-120), EndDate: day(-30)},
+		Team: []string{userID2}, CreatedBy: userID2, CreatedAt: ts(-120), UpdatedAt: ts(-30),
+	}
+
+	// Closed well outside the 90-day window — should NOT show under Recently Completed.
+	engID5 := "eng_005"
+	s.engagements[engID5] = &Engagement{
+		ID: engID5, OrgID: orgID, Name: "Legacy Perimeter Assessment",
+		ClientName: "Northwind Bank", Status: "closed", Methodology: "owasp",
+		Scope: EngagementScope{
+			Included: []string{"192.168.50.0/24"},
+		},
+		Timeline: Timeline{StartDate: day(-300), EndDate: day(-210)},
+		Team: []string{userID2}, CreatedBy: userID2, CreatedAt: ts(-300), UpdatedAt: ts(-210),
 	}
 
 	engagements := []string{engID, engID2, engID3, engID4}
