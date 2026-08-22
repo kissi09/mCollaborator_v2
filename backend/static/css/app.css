@@ -217,18 +217,21 @@ input, textarea, select, button { font-family: inherit; }
 .status-pill.draft { background: color-mix(in srgb, #8B5CF6 15%, transparent); color: #8B5CF6; border: 1px solid color-mix(in srgb, #8B5CF6 30%, transparent); }
 
 .btn {
-  display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px; padding: 0 16px; height: 36px;
   font-family: var(--font-display); font-size: 13px; font-weight: 600;
-  border: none; cursor: pointer; border-radius: var(--radius); letter-spacing: 0.5px;
-  transition: all 0.15s;
+  border: 1px solid transparent; cursor: pointer; border-radius: var(--radius);
+  letter-spacing: 0.5px; white-space: nowrap; transition: all 0.15s;
 }
+.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .btn-primary { background: var(--primary); color: var(--bg); }
 .btn-primary:hover { opacity: 0.9; }
-.btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-secondary { background: var(--surface); border-color: var(--border); color: var(--text); }
 .btn-secondary:hover { border-color: var(--primary); color: var(--primary); }
 .btn-danger { background: var(--critical); color: #fff; }
-.btn-ghost { background: transparent; color: var(--muted); border: none; }
-.btn-ghost:hover { color: var(--text); }
+.btn-danger:hover { opacity: 0.9; }
+.btn-ghost { background: transparent; color: var(--muted); }
+.btn-ghost:hover { color: var(--text); background: var(--surface-hover); }
 
 .input {
   background: var(--bg); border: 1px solid var(--border); color: var(--text);
@@ -249,7 +252,7 @@ input, textarea, select, button { font-family: inherit; }
 
 [data-theme="cyberpunk"] .table tr:nth-child(even) td { background: #0E1017; }
 .table tr:hover td { background: var(--surface-hover); }
-.table tr { cursor: pointer; }
+.table tr.clickable-row { cursor: pointer; }
 
 /* ============ LOGIN ============ */
 .login-page {
@@ -283,7 +286,7 @@ input, textarea, select, button { font-family: inherit; }
   display: block; margin-bottom: 4px;
   color: var(--muted);
 }
-.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
 
 /* ============ LOADING ============ */
 .skeleton {
@@ -332,6 +335,7 @@ input, textarea, select, button { font-family: inherit; }
 .toast.success { background: color-mix(in srgb, #22C55E 15%, transparent); color: #22C55E; border-color: color-mix(in srgb, #22C55E 30%, transparent); }
 .toast.error { background: color-mix(in srgb, var(--critical) 15%, transparent); color: var(--critical); border-color: color-mix(in srgb, var(--critical) 30%, transparent); }
 .toast.info { background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--primary); border-color: color-mix(in srgb, var(--primary) 30%, transparent); }
+.toast.warning { background: color-mix(in srgb, #F59E0B 15%, transparent); color: #F59E0B; border-color: color-mix(in srgb, #F59E0B 30%, transparent); }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ============ UTILITY ============ */
@@ -396,6 +400,15 @@ input, textarea, select, button { font-family: inherit; }
 .editor-preview p { margin-bottom: 12px; line-height: 1.6; }
 .editor-preview code { background: var(--bg); padding: 2px 6px; border-radius: 2px; font-family: var(--font-mono); font-size: 12px; }
 .editor-preview pre { background: var(--bg); padding: 16px; border-radius: var(--radius); overflow-x: auto; margin-bottom: 16px; }
+
+/* Inline section tabs (finding detail) */
+.tab-btn {
+  background: none; border: none; padding: 10px 2px; margin-bottom: -1px;
+  border-bottom: 2px solid transparent; color: var(--muted);
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--primary); }
+.tab-btn-active { color: var(--primary); border-bottom-color: var(--primary); }
 
 /* ============ EVIDENCE VAULT ============ */
 .dropzone {

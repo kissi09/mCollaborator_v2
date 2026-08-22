@@ -12,7 +12,7 @@ worth using for testing.
 | Persistence | **None.** `store.go` is `map[string]*Finding` etc. behind a `sync.RWMutex`. Every restart re-runs `seed()` and all analyst work is lost. |
 | Multi-user | Single process, single memory space. Two analysts only collaborate if they hit the *same* running binary. |
 | "Real-time" | `startFindingsPolling()` polls `GET /engagements/{id}/findings/changes?since=<RFC3339>` every 15 s and raises a toast. |
-| Concurrency control | `Finding.Version int` exists on the model but nothing increments or checks it. Last write wins. |
+| Concurrency control | Half-built. `UpdateFinding` **does** increment `Finding.Version`, and `UpdateFindingWithVersion` implements proper conflict detection — but no handler calls it, so every live write still goes through the last-write-wins path. |
 | Evidence | Uploaded into process memory / local disk, not shared. |
 
 The gap is not really "real-time" — it is that **there is no shared source of truth at
@@ -223,6 +223,138 @@ Findings as Markdown/YAML in a repo, PRs for review.
 
 ---
 
+## 3.7 Dataverse: concrete implementation runbook
+
+Dataverse is the strongest of the Microsoft options for this workload — it keeps the data
+in the tenant like SharePoint, but it is a real relational store underneath, so most of
+§2.6's limits simply do not apply.
+
+### Why it fits better than SharePoint
+
+| Constraint | SharePoint | Dataverse |
+|---|---|---|
+| Item ceiling per query | 5,000 view threshold | none (SQL-backed, paged) |
+| Long text column | 63,999 chars | 1,048,576 chars |
+| Binary evidence | separate document library + upload sessions | native **File** (128 MB) and **Image** columns on the row |
+| Optimistic concurrency | ETag on list items | first-class `@odata.etag` + `If-Match` → 412 |
+| Change feed | list webhooks, ≤30 day renewal | per-table **change tracking** with `@odata.deltaLink`, plus webhooks / Service Bus |
+| Relationships | lookup columns, awkward via Graph | real lookups, `$expand` joins |
+
+The File column is the clean answer to the base64-PoC problem in §2.3 — screenshots
+attach to the finding row itself, no separate library plumbing.
+
+### Step 1 — Get an environment (you, ~30 min)
+
+The licensing question is the usual blocker, but there is a free path for exactly this:
+
+- **Power Apps Developer Plan** — free, gives developer environments with full Dataverse.
+  Sign up at `aka.ms/PowerAppsDevPlan` with the work account. Intended for dev/test, which
+  is precisely this use case.
+- Caveat: developer environments are not for production and can be reclaimed after a
+  long idle period. Fine for testing, not a home for real client data.
+
+Then: Power Platform Admin Center → New environment → type **Developer** → *Create a
+database* → note the Environment URL (`https://<org>.crm<N>.dynamics.com`).
+
+### Step 2 — App registration + application user (you, ~20 min)
+
+This is the part people get wrong, so in order:
+
+1. Entra ID → App registrations → New registration (single tenant).
+2. Certificates & secrets → New client secret. Record it.
+3. Record the **Tenant ID** and **Application (client) ID**.
+4. **Power Platform Admin Center → your environment → Settings → Users + permissions →
+   Application users → New app user** → pick the Entra app → assign a security role
+   (*System Customizer* is enough for testing).
+
+Step 4 is mandatory and easy to miss. Without it the app authenticates fine and then gets
+**403 on every request**, which reads like a code bug and is not.
+
+### Step 3 — Schema (either of us)
+
+Create a publisher + solution first so tables get a prefix (`ct_`). Tables mirror
+`models.go`:
+
+| Go type | Dataverse table | Notes |
+|---|---|---|
+| `Engagement` | `ct_engagement` | choice cols for status/methodology |
+| `Finding` | `ct_finding` | lookup → engagement; choice severity/status; **File** col for PoC |
+| `Node` | `ct_node` | lookup → engagement |
+| `Evidence` | `ct_evidence` | **File** column holds the bytes |
+| `ActivityItem` | `ct_activity` | |
+
+Enable **change tracking** on `ct_finding` and `ct_engagement` (table settings) or the
+delta feed in step 5 will not work.
+
+I can generate this as a solution definition / PAC CLI script; you run it against the env.
+
+### Step 4 — Auth + client (me)
+
+No official Go SDK, but the Web API is plain OData v4, so `net/http` is sufficient.
+
+Client-credentials token:
+```
+POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
+  grant_type=client_credentials
+  client_id={appId}&client_secret={secret}
+  scope=https://{org}.crm{N}.dynamics.com/.default
+```
+Then `Authorization: Bearer …` against
+`https://{org}.crm{N}.dynamics.com/api/data/v9.2/ct_findings`.
+
+Optimistic concurrency maps 1:1 onto the existing `UpdateFindingWithVersion` semantics:
+```
+PATCH /api/data/v9.2/ct_findings(<id>)
+If-Match: W/"1234567"        → 412 Precondition Failed when someone else won
+```
+
+### Step 5 — Change feed → SSE (me)
+
+```
+GET /api/data/v9.2/ct_findings?$select=...
+Prefer: odata.track-changes
+→ body includes "@odata.deltaLink": ".../ct_findings?$deltatoken=..."
+```
+Poll the deltaLink on a short interval and fan changes out over SSE. **No public HTTPS
+endpoint required**, which makes local testing far easier than SharePoint's webhooks.
+Register real webhooks later if sub-second latency matters.
+
+### Step 6 — Refactor (me)
+
+`Store` is currently a concrete struct with 48 public methods. Nothing outside `store.go`
+touches its fields — handlers only call methods — so extracting a `Store` interface is
+mechanical rather than invasive, then `MemoryStore` and `DataverseStore` both satisfy it.
+
+Note that six of those methods (`FindingsOverTime`, `FindingCountBySeverity`,
+`FindingStatusCount`, `TopVulnerableAssets`, `RecurringCWEs`,
+`ListAllFindingSeverities`) served the Insight dashboard that has since been removed.
+Their routes still exist but no UI calls them, so a Dataverse implementation can stub them
+initially and add `$apply` aggregations later.
+
+### Effort estimate
+
+| Task | Who | Estimate |
+|---|---|---|
+| Environment + app registration + app user | you | ~1 hour |
+| Extract `Store` interface, keep memory impl | me | ~half a day |
+| Schema / solution definition | me + you to apply | ~half a day |
+| Dataverse client: auth, CRUD, OData mapping | me | 2–3 days |
+| Change tracking → SSE | me | 1–2 days |
+| Wire up 409 conflict handling end to end | me | ~half a day |
+| Analytics via `$apply` (optional) | me | ~1 day |
+
+### Honest caveat on "testing all the functionality"
+
+Dataverse is the right call if it is the likely **production** target — building against it
+now avoids migrating twice. But if the goal is genuinely to *exercise the app's features*,
+it works against you: every test run then needs network, a valid token, and 100–300 ms per
+API call, which makes the suite slower and flakier. SQLite tests the functionality better;
+Dataverse tests the integration. Those are different goals, and it is worth being clear
+which one is being bought.
+
+A good compromise: extract the interface, keep `MemoryStore`/SQLite for feature and CI
+testing, and add `DataverseStore` behind the same interface for integration testing.
+
 ## 4. Suggested phasing
 
 1. **Persistence first — SQLite.** Swap the maps in `store.go`. Unblocks all multi-user
@@ -230,9 +362,10 @@ Findings as Markdown/YAML in a repo, PRs for review.
 2. **Move PoC images out of the text field** into the evidence store, with reference
    resolution at render/report time. Needed for *every* backend option, and it fixes the
    report payload bloat today.
-3. **Add optimistic concurrency.** Actually increment and check `Finding.Version`; return
-   409 on mismatch and show a conflict banner. This is what makes two analysts on one
-   finding safe, independent of storage.
+3. **Finish optimistic concurrency.** The logic already exists in
+   `UpdateFindingWithVersion`; wire `PUT /findings/{id}` to it, have the client send the
+   version it read, return 409 on mismatch and show a conflict banner. This is what makes
+   two analysts on one finding safe, independent of storage — and it is close to free.
 4. **Replace polling with SSE.** Removes the 15 s lag and the toast-spam, and is the same
    browser-facing contract regardless of what sits behind it.
 5. **Then decide storage.** If tenant governance is required → build the SharePoint sync

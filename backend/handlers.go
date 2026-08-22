@@ -2,15 +2,31 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// ensureUploadsDir returns the directory where uploaded evidence files are
+// stored on disk. It is created on demand.
+func ensureUploadsDir() (string, error) {
+	dir := filepath.Join("data", "uploads")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("create uploads dir: %w", err)
+	}
+	return dir, nil
+}
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -84,6 +100,22 @@ type createUserInput struct {
 // minPasswordLength is the shortest password an admin may set for a new user.
 const minPasswordLength = 8
 
+// rolePermissions maps each role to the permissions granted on account
+// creation. Analysts are full finding/vault/report workers; project managers
+// only get reporting so they can review and export without touching findings.
+func rolePermissions(role string) []string {
+	switch role {
+	case "admin":
+		return []string{"finding:write", "vault:read", "vault:write", "report:export", "admin:users", "engagements:write"}
+	case "analyst":
+		return []string{"finding:write", "vault:read", "vault:write", "report:export", "engagements:write"}
+	case "project_manager":
+		return []string{"report:export"}
+	default:
+		return []string{}
+	}
+}
+
 func HandleCreateUser(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input createUserInput
@@ -95,8 +127,8 @@ func HandleCreateUser(store *Store) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "email, name, and role are required"}})
 			return
 		}
-		if input.Role != "admin" && input.Role != "analyst" && input.Role != "user" && input.Role != "client" {
-			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "role must be admin, analyst, user, or client"}})
+		if input.Role != "admin" && input.Role != "analyst" && input.Role != "project_manager" {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "role must be admin, analyst, or project_manager"}})
 			return
 		}
 		if len(input.Password) < minPasswordLength {
@@ -110,21 +142,57 @@ func HandleCreateUser(store *Store) http.HandlerFunc {
 			return
 		}
 		newUser := &User{
-			ID:             uuid.New().String(),
-			OrgID:          user.OrgID,
-			Email:          input.Email,
-			Name:           input.Name,
-			Role:           input.Role,
-			PasswordHash:   string(hash),
-			Permissions:    []string{},
-			CreatedAt:      time.Now().Format(time.RFC3339),
-			PasswordExpiry: time.Now().AddDate(0, 3, 0),
+			ID:                 uuid.New().String(),
+			OrgID:              user.OrgID,
+			Email:              input.Email,
+			Name:               input.Name,
+			Role:               input.Role,
+			PasswordHash:       string(hash),
+			Permissions:        rolePermissions(input.Role),
+			CreatedAt:          time.Now().Format(time.RFC3339),
+			PasswordExpiry:     time.Now().AddDate(0, 3, 0),
+			MustChangePassword: input.Role != "admin",
 		}
 		if err := store.CreateUser(newUser); err != nil {
 			writeJSON(w, http.StatusConflict, ApiResponse{Error: &ApiError{Code: "CONFLICT", Message: err.Error()}})
 			return
 		}
 		writeJSON(w, http.StatusCreated, ApiResponse{Data: newUser})
+	}
+}
+
+// HandleChangePassword lets a user set a new password using their current one.
+// It clears the first-login "must change" flag and resets the 90-day expiry.
+func HandleChangePassword(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := r.Context().Value(userContextKey).(*User)
+		var input struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "Invalid request body"}})
+			return
+		}
+		if len(input.NewPassword) < minPasswordLength {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: fmt.Sprintf("new password must be at least %d characters", minPasswordLength)}})
+			return
+		}
+		if _, err := store.Authenticate(user.Email, input.CurrentPassword); err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_INPUT", Message: "Current password is incorrect"}})
+			return
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(input.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{Error: &ApiError{Code: "INTERNAL", Message: "Could not update password"}})
+			return
+		}
+		if err := store.UpdateUserPassword(user.ID, string(hash)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{Error: &ApiError{Code: "INTERNAL", Message: "Could not update password"}})
+			return
+		}
+		store.AddAuditLog(&AuditLog{OrgID: user.OrgID, ActorID: user.ID, Action: "user.password_change", Resource: "user", ResourceID: user.ID, IPAddress: r.RemoteAddr})
+		writeJSON(w, http.StatusOK, ApiResponse{Data: map[string]string{"message": "Password updated"}})
 	}
 }
 
@@ -251,21 +319,23 @@ func HandleCreateNode(store *Store) http.HandlerFunc {
 }
 
 type createFindingInput struct {
-	NodeID        string   `json:"node_id,omitempty"`
-	Title         string   `json:"title"`
-	CVE           string   `json:"cve,omitempty"`
-	CWEs          []string `json:"cwes,omitempty"`
+	NodeID         string   `json:"node_id,omitempty"`
+	Title          string   `json:"title"`
+	CVE            string   `json:"cve,omitempty"`
+	CWEs           []string `json:"cwes,omitempty"`
 	MitreAttackIDs []string `json:"mitre_attack_ids,omitempty"`
-	Severity      string   `json:"severity"`
-	CVSSVector    string   `json:"cvss_vector,omitempty"`
-	CVSSScore     float64  `json:"cvss_score"`
-	Status        string   `json:"status"`
-	Description   string   `json:"description"`
-	POC           string   `json:"poc,omitempty"`
-	Remediation   string   `json:"remediation,omitempty"`
-	Impact        string   `json:"impact,omitempty"`
-	Likelihood    string   `json:"likelihood,omitempty"`
-	AssignedTo    string   `json:"assigned_to,omitempty"`
+	Category       string   `json:"category,omitempty"`
+	Severity       string   `json:"severity"`
+	CVSSVector     string   `json:"cvss_vector,omitempty"`
+	CVSSScore      float64  `json:"cvss_score"`
+	Status         string   `json:"status"`
+	Description    string   `json:"description"`
+	POC            string   `json:"poc,omitempty"`
+	Remediation    string   `json:"remediation,omitempty"`
+	Impact         string   `json:"impact,omitempty"`
+	Likelihood     string   `json:"likelihood,omitempty"`
+	AssignedTo     string   `json:"assigned_to,omitempty"`
+	EvidenceIDs    []string `json:"evidence_ids,omitempty"`
 }
 
 func HandleListFindings(store *Store) http.HandlerFunc {
@@ -303,10 +373,11 @@ func HandleCreateFinding(store *Store) http.HandlerFunc {
 		finding := &Finding{
 			EngagementID: engID, NodeID: input.NodeID, Title: input.Title,
 			CVE: input.CVE, CWEs: input.CWEs, MitreAttackIDs: input.MitreAttackIDs,
+			Category: input.Category,
 			Severity: input.Severity, CVSSVector: input.CVSSVector, CVSSScore: input.CVSSScore,
 			Status: input.Status, Description: input.Description, POC: input.POC,
 			Remediation: input.Remediation, Impact: input.Impact, Likelihood: input.Likelihood,
-			AssignedTo: input.AssignedTo, CreatedBy: user.ID,
+			AssignedTo: input.AssignedTo, EvidenceIDs: input.EvidenceIDs, CreatedBy: user.ID,
 		}
 		store.CreateFinding(finding)
 		store.AddActivity(&ActivityItem{OrgID: user.OrgID, UserID: user.ID, UserName: user.Name, Action: "added_finding", Detail: fmt.Sprintf("Added %s finding: %s", finding.Severity, finding.Title), EngagementID: engID})
@@ -334,6 +405,7 @@ func HandleUpdateFinding(store *Store) http.HandlerFunc {
 		finding.CVE = input.CVE
 		finding.CWEs = input.CWEs
 		finding.MitreAttackIDs = input.MitreAttackIDs
+		finding.Category = input.Category
 		finding.Severity = input.Severity
 		finding.CVSSVector = input.CVSSVector
 		finding.CVSSScore = input.CVSSScore
@@ -344,6 +416,7 @@ func HandleUpdateFinding(store *Store) http.HandlerFunc {
 		finding.Impact = input.Impact
 		finding.Likelihood = input.Likelihood
 		finding.AssignedTo = input.AssignedTo
+		finding.EvidenceIDs = input.EvidenceIDs
 		store.UpdateFinding(finding)
 		store.AddAuditLog(&AuditLog{OrgID: user.OrgID, ActorID: user.ID, Action: "finding.update", Resource: "finding", ResourceID: finding.ID, IPAddress: r.RemoteAddr})
 		writeJSON(w, http.StatusOK, ApiResponse{Data: finding})
@@ -398,7 +471,7 @@ func HandleBulkCreateFindings(store *Store) http.HandlerFunc {
 				Severity: inp.Severity, CVSSVector: inp.CVSSVector, CVSSScore: inp.CVSSScore,
 				Status: inp.Status, Description: inp.Description, POC: inp.POC,
 				Remediation: inp.Remediation, Impact: inp.Impact, Likelihood: inp.Likelihood,
-				AssignedTo: inp.AssignedTo, CreatedBy: user.ID,
+				AssignedTo: inp.AssignedTo, EvidenceIDs: inp.EvidenceIDs, CreatedBy: user.ID,
 			}
 			findings = append(findings, f)
 		}
@@ -421,7 +494,7 @@ func HandleFindingsChanges(store *Store) http.HandlerFunc {
 		}
 		changes := store.ListFindingsChanges(since, engID)
 		writeJSON(w, http.StatusOK, ApiResponse{Data: map[string]interface{}{
-			"changes":  changes,
+			"changes":    changes,
 			"checked_at": time.Now().UTC().Format(time.RFC3339),
 		}})
 	}
@@ -471,11 +544,31 @@ func HandleCreateEvidence(store *Store) http.HandlerFunc {
 		tags := r.FormValue("tags")
 		desc := r.FormValue("description")
 
-		storageKey := fmt.Sprintf("uploads/%s_%s", uuid.New().String(), handler.Filename)
+		// Read the full file bytes so they can be persisted to disk and hashed.
+		data, err := io.ReadAll(file)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_REQUEST", Message: "Failed to read file"}})
+			return
+		}
+		sum := sha256.Sum256(data)
+
+		safeName := sanitizeFilename(handler.Filename)
+		storageKey := fmt.Sprintf("uploads/%s_%s", uuid.New().String(), safeName)
+		uploadsDir, err := ensureUploadsDir()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{Error: &ApiError{Code: "INTERNAL_ERROR", Message: err.Error()}})
+			return
+		}
+		destPath := filepath.Join(uploadsDir, filepath.Base(storageKey))
+		if err := os.WriteFile(destPath, data, 0644); err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{Error: &ApiError{Code: "INTERNAL_ERROR", Message: "Failed to persist file"}})
+			return
+		}
+
 		ev := &Evidence{
 			EngagementID: engagementID, FindingID: findingID, Filename: handler.Filename,
 			StorageKey: storageKey, MimeType: handler.Header.Get("Content-Type"),
-			SizeBytes: handler.Size, HashSHA256: fmt.Sprintf("%x", make([]byte, 32)),
+			SizeBytes: int64(len(data)), HashSHA256: hex.EncodeToString(sum[:]),
 			Tags: tags, Description: desc, UploadedBy: user.ID,
 		}
 		store.CreateEvidence(ev)
@@ -485,11 +578,42 @@ func HandleCreateEvidence(store *Store) http.HandlerFunc {
 	}
 }
 
+// HandleEvidenceFile serves the stored bytes of an evidence record. The
+// Content-Disposition is inline so images render directly in the browser.
+func HandleEvidenceFile(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		ev, err := store.GetEvidence(id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, ApiResponse{Error: &ApiError{Code: "NOT_FOUND", Message: "Evidence not found"}})
+			return
+		}
+		uploadsDir, err := ensureUploadsDir()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{Error: &ApiError{Code: "INTERNAL_ERROR", Message: err.Error()}})
+			return
+		}
+		filePath := filepath.Join(uploadsDir, filepath.Base(ev.StorageKey))
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, ApiResponse{Error: &ApiError{Code: "NOT_FOUND", Message: "Evidence file missing on disk"}})
+			return
+		}
+		contentType := ev.MimeType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", strings.ReplaceAll(ev.Filename, `"`, "_")))
+		http.ServeFile(w, r, filePath)
+	}
+}
+
 func HandleListEvidence(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		engID := r.URL.Query().Get("engagement_id")
 		findingID := r.URL.Query().Get("finding_id")
 		evidence := store.ListEvidence(engID, findingID)
+		enrichEvidenceUploaders(store, evidence)
 		writeJSON(w, http.StatusOK, ApiResponse{Data: evidence})
 	}
 }
@@ -502,13 +626,34 @@ func HandleGetEvidence(store *Store) http.HandlerFunc {
 			writeJSON(w, http.StatusNotFound, ApiResponse{Error: &ApiError{Code: "NOT_FOUND", Message: "Evidence not found"}})
 			return
 		}
+		enrichEvidenceUploaders(store, []*Evidence{ev})
 		writeJSON(w, http.StatusOK, ApiResponse{Data: ev})
+	}
+}
+
+// enrichEvidenceUploaders fills in UploadedByName for each record so the UI can
+// show a human name instead of a raw user id.
+func enrichEvidenceUploaders(store *Store, evidence []*Evidence) {
+	for _, ev := range evidence {
+		if ev.UploadedByName != "" || ev.UploadedBy == "" {
+			continue
+		}
+		if u, err := store.GetUser(ev.UploadedBy); err == nil {
+			ev.UploadedByName = u.Name
+		}
 	}
 }
 
 func HandleDeleteEvidence(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
+		ev, err := store.GetEvidence(id)
+		if err == nil {
+			uploadsDir, dirErr := ensureUploadsDir()
+			if dirErr == nil {
+				os.Remove(filepath.Join(uploadsDir, filepath.Base(ev.StorageKey)))
+			}
+		}
 		store.DeleteEvidence(id)
 		writeJSON(w, http.StatusOK, ApiResponse{Data: map[string]string{"message": "Deleted"}})
 	}
@@ -556,8 +701,6 @@ func HandleGetReport(store *Store) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, ApiResponse{Data: report})
 	}
 }
-
-
 
 func HandleReportDownload(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

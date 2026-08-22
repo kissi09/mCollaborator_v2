@@ -19,10 +19,10 @@ function validateEmail(email) {
 let stitchToken, stitchTheme;
 try {
   stitchToken = localStorage.getItem('stitch_token');
-  stitchTheme = localStorage.getItem('stitch_theme') || 'cyberpunk';
+  stitchTheme = localStorage.getItem('stitch_theme') || 'insight';
 } catch (e) {
   stitchToken = null;
-  stitchTheme = 'cyberpunk';
+  stitchTheme = 'insight';
 }
 
 const STITCH = {
@@ -119,7 +119,25 @@ const STITCH = {
       return;
     }
 
+    // First-login gate: a user with must_change_password cannot leave the
+    // change-password screen until they set a new password.
+    if (this.user && this.user.must_change_password && path !== '/change-password') {
+      main.innerHTML = `<div class="login-page">${renderChangePassword()}</div>`;
+      return;
+    }
+
     const isActive = (p) => path === p || (p !== '/dashboard' && p !== '/' && path.startsWith(p)) ? 'active' : '';
+
+    // Role-aware navigation: each role only sees the tabs it can use.
+    const navLink = (href, label) =>
+      `<a class="nav-link ${isActive(href)}" href="${href}">${label}</a>`;
+    const role = this.user?.role || '';
+    const navTabs = [navLink('#/dashboard', 'Dashboard'), navLink('#/ledger/project', 'Projects')];
+    if (role === 'admin' || role === 'analyst') navTabs.push(navLink('#/finding-editor', 'Findings'));
+    if (role === 'admin' || role === 'analyst') navTabs.push(navLink('#/evidence', 'Evidence'));
+    navTabs.push(navLink('#/reports', 'Reports'));
+    if (role === 'admin') navTabs.push(navLink('#/admin/users', 'Users'));
+    if (role === 'admin' || role === 'project_manager') navTabs.push(navLink('#/closure-prep', 'Closure Prep'));
 
     let pageContent = '';
     switch (true) {
@@ -155,6 +173,12 @@ const STITCH = {
       case path === '/admin/users':
         pageContent = renderUserManagement();
         break;
+      case path === '/closure-prep':
+        pageContent = renderClosurePrep();
+        break;
+      case path === '/change-password':
+        pageContent = renderChangePassword();
+        break;
       default:
         pageContent = renderLedgerDashboard();
     }
@@ -167,14 +191,7 @@ const STITCH = {
               <img src="/images/cyberteq-mark.png" alt="" class="brand-mark">
               <span class="nav-title">mCollaborator</span>
             </a>
-            <div class="nav-links">
-              <a class="nav-link ${isActive('/dashboard')}" href="#/dashboard">Dashboard</a>
-              <a class="nav-link ${isActive('/ledger/project')}" href="#/ledger/project">Projects</a>
-              <a class="nav-link ${isActive('/finding-editor')}" href="#/finding-editor">Findings</a>
-              <a class="nav-link ${isActive('/evidence')}" href="#/evidence">Evidence</a>
-              <a class="nav-link ${isActive('/reports')}" href="#/reports">Reports</a>
-              <a class="nav-link ${isActive('/admin/users')}" href="#/admin/users">Users</a>
-            </div>
+            <div class="nav-links">${navTabs.join('')}</div>
           </div>
           <div class="nav-right">
             <select class="nav-select" onchange="STITCH.setTheme(this.value)">
@@ -211,6 +228,8 @@ function getPageTitle(path) {
     '/command/feed': 'Vulnerability Feed',
     '/command/report-builder': 'Report Builder',
     '/admin/users': 'User Management',
+    '/closure-prep': 'Closure Prep',
+    '/change-password': 'Change Password',
     '/login': 'Login',
   };
   return titles[path] || 'mCollaborator';

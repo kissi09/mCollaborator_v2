@@ -24,3 +24,11 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Live application state — a running server's database, its WAL, and the
+# evidence files uploaded into it. Real engagement data, never source.
+backend/data/
+backend/*.pid
+
+# Editor / pre-refactor backups kept locally
+*.bak

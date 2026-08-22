@@ -29,6 +29,7 @@ func main() {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 	r.Use(rateLimitMiddleware)
+	r.Use(persistMiddleware(store))
 
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -41,9 +42,10 @@ func main() {
 
 			// User
 			r.Get("/users/me", HandleGetMe(store))
-			r.Get("/users", HandleListUsers(store))
+			r.Get("/users", requirePermission("admin:users", HandleListUsers(store)))
 			r.Post("/users", requirePermission("admin:users", HandleCreateUser(store)))
 			r.Delete("/users/{id}", requirePermission("admin:users", HandleDeleteUser(store)))
+			r.Post("/users/me/password", HandleChangePassword(store))
 
 			// Engagements
 			r.Get("/engagements", HandleListEngagements(store))
@@ -63,7 +65,7 @@ func main() {
 			r.Put("/findings/{id}", requirePermission("finding:write", HandleUpdateFinding(store)))
 			r.Patch("/findings/{id}/status", requirePermission("finding:write", HandleUpdateFindingStatus(store)))
 			r.Post("/findings/{id}/assign", requirePermission("finding:write", HandleAssignFinding(store)))
-			r.Delete("/findings/{id}", requirePermission("finding:write", HandleDeleteFinding(store)))
+			r.Delete("/findings/{id}", requirePermission("admin:findings", HandleDeleteFinding(store)))
 			r.Get("/findings/{id}/comments", HandleListComments(store))
 			r.Post("/findings/{id}/comments", HandleCreateComment(store))
 
@@ -71,6 +73,7 @@ func main() {
 			r.Get("/evidence", HandleListEvidence(store))
 			r.Post("/evidence/upload", requirePermission("vault:write", HandleCreateEvidence(store)))
 			r.Get("/evidence/{id}", HandleGetEvidence(store))
+			r.Get("/evidence/{id}/file", HandleEvidenceFile(store))
 			r.Delete("/evidence/{id}", requirePermission("vault:write", HandleDeleteEvidence(store)))
 
 			// Reports
