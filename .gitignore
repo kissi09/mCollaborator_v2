@@ -43,8 +43,16 @@ backend/*.pid
 docs/*.pptx
 docs/*Closure Report*
 
-# Desktop build output. The binaries are large and rebuildable; dist/ is where
-# build.ps1 collects the shipping artefacts.
+# Desktop build output. build/bin is scratch; dist/ is the shipping set.
 desktop/build/bin/
-desktop/dist/
 desktop/build/windows/installer/tmp/
+
+# The shipping binaries are committed, by request, so the app can be downloaded
+# straight from the repository rather than from a release. They are exempted
+# from the blanket *.exe rule above.
+#
+# Worth knowing: git keeps every version of these forever, so each rebuild that
+# is committed adds its full size to the history permanently and every clone
+# pays for it. Roughly 38MB a build at present.
+!desktop/dist/
+!desktop/dist/*.exe
