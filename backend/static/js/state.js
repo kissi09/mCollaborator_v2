@@ -154,7 +154,10 @@ const MCOLLABORATOR = {
     if (role === 'admin' || role === 'analyst') navTabs.push(navLink('#/evidence', 'Evidence'));
     navTabs.push(navLink('#/reports', 'Reports'));
     if (role === 'admin') navTabs.push(navLink('#/admin/users', 'Users'));
-    if (role === 'admin' || role === 'project_manager') navTabs.push(navLink('#/closure-prep', 'Closure Prep'));
+    // Closure prep is open to every role. Preparing a closing meeting is a
+    // shared activity: the analyst who found the issues has as much to add to
+    // the deck as the manager who presents it.
+    navTabs.push(navLink('#/closure-prep', 'Closure Prep'));
 
     let pageContent = '';
     switch (true) {
