@@ -1,8 +1,4 @@
 # Build artifacts
-*.exe
-*.exe~
-backend/mCollaborator.exe
-backend/mCollaborator.exe~
 # Pre-rename binaries, so a leftover copy is never committed either
 backend/stitch.exe
 backend/stitch.exe~
@@ -47,12 +43,4 @@ docs/*Closure Report*
 desktop/build/bin/
 desktop/build/windows/installer/tmp/
 
-# The shipping binaries are committed, by request, so the app can be downloaded
-# straight from the repository rather than from a release. They are exempted
-# from the blanket *.exe rule above.
-#
-# Worth knowing: git keeps every version of these forever, so each rebuild that
-# is committed adds its full size to the history permanently and every clone
-# pays for it. Roughly 38MB a build at present.
-!desktop/dist/
-!desktop/dist/*.exe
+
