@@ -99,27 +99,102 @@ async function handleChangePassword(e) {
 // -------- CLOSURE PREP --------
 // Placeholder workspace: project managers get a "work in progress" notice,
 // admins get an empty section. The real closure workflow lands here next.
+// -------- CLOSURE PREP --------
+// The closing meeting is presented from a deck built out of the same findings
+// the report is built from. This page generates it.
+//
+// It reuses the report wizard's state rather than asking for the engagement
+// details a second time: a closing deck that disagreed with the report about the
+// client name, the date or which findings were included would be worse than no
+// deck at all. The page therefore only offers to build once the wizard has been
+// filled in, and says so plainly when it has not.
 function renderClosurePrep() {
-  const pm = isProjectManager();
+  const s = reportWizardState;
+  const ready = (s.companyName || '').trim() !== '' && s.findings.length > 0;
+  const withProof = s.findings.filter(f => (f.evidence_ids || []).length > 0).length;
+
   return `
     <div>
       <div class="flex items-center justify-between mb-6">
         <h2 class="font-display font-bold" style="font-size:22px;">Closure Prep</h2>
-        ${pm ? '<span class="status-pill in_progress">In Progress</span>' : ''}
+        ${ready ? '<span class="status-pill open">Ready</span>' : ''}
       </div>
-      ${pm ? `
-        <div class="card p-6" style="text-align:center;padding:80px 24px;">
-          <div style="font-size:40px;margin-bottom:12px;">&#128736;</div>
-          <h3 class="font-display font-bold mb-2">Work in Progress</h3>
-          <p class="text-sm text-muted">Project closure preparation is coming soon. Check back later.</p>
+
+      ${!ready ? `
+        <div class="card p-6" style="text-align:center;padding:64px 24px;">
+          <div style="font-size:40px;margin-bottom:12px;">&#128202;</div>
+          <h3 class="font-display font-bold mb-2">Fill in the report wizard first</h3>
+          <p class="text-sm text-muted" style="max-width:520px;margin:0 auto 20px;">
+            The closing deck is built from the same engagement details and findings as the
+            report, so that the two cannot disagree. Complete the wizard, then come back.
+          </p>
+          <a class="btn btn-primary" href="#/reports" style="text-decoration:none;">Open the report wizard</a>
         </div>`
       : `
-        <div class="card p-6">
-          <p class="text-sm text-muted">Closure preparation workspace.</p>
+        <div class="card p-4 mb-4">
+          <h4 class="font-semibold mb-2">What the deck will contain</h4>
+          <div style="font-size:13px;color:var(--text-muted);">
+            <div class="mb-1"><strong>Company:</strong> ${sanitizeInput(s.companyName)}</div>
+            <div class="mb-1"><strong>Reference:</strong> ${sanitizeInput(s.refNumber) || 'Not specified'}</div>
+            <div class="mb-1"><strong>Findings:</strong> ${s.findings.length} across ${selectedAreaCodes().length} area(s)</div>
+            <div class="mb-1"><strong>Vulnerability scenarios:</strong> ${withProof} finding(s) have evidence attached</div>
+            <div class="text-xs mt-3">
+              Every finding appears in the issues tables. A finding gets a scenario slide only
+              where a screenshot is attached to it in the Evidence vault &mdash; the deck shows the
+              same image the report does, not a second copy.
+            </div>
+          </div>
+        </div>
+
+        <div id="closure-result" style="border:1px solid var(--border);border-radius:var(--radius);padding:32px;background:var(--bg);min-height:160px;">
+          <div style="text-align:center;color:var(--muted);padding:28px 0;">
+            <div style="font-size:32px;margin-bottom:8px;">&#127909;</div>
+            <p>Generate the closing meeting deck from this engagement.</p>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:20px;">
+          <button class="btn btn-primary" onclick="generateClosureDeck()">&#9889; Generate Closing Deck</button>
         </div>`
       }
     </div>
   `;
+}
+
+// generateClosureDeck posts the wizard's engagement to the closure endpoint and
+// shows the result, including which findings will have no scenario slide.
+async function generateClosureDeck() {
+  const btn = document.querySelector('[onclick="generateClosureDeck()"]');
+  if (btn) btn.disabled = true;
+  showToast('Building the closing deck...', 'info');
+  try {
+    const res = await api.post('/reports/closure', reportWizardPayload());
+    const url = res.data?.pptx_url;
+    const unproven = res.data?.findings_without_proof || [];
+
+    const box = document.getElementById('closure-result');
+    if (box) {
+      const warning = unproven.length ? `
+        <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
+          &#9888; ${unproven.length} finding${unproven.length === 1 ? ' has' : 's have'} no evidence attached, so
+          ${unproven.length === 1 ? 'it gets' : 'they get'} no scenario slide:
+          <ul style="margin:6px 0 0 18px;">${unproven.map(f => `<li>${sanitizeInput(f)}</li>`).join('')}</ul>
+          <span class="text-xs">Attach a screenshot in the Evidence vault and generate again.</span>
+        </div>` : '';
+      box.innerHTML = `
+        <div style="text-align:center;padding:24px 0;">
+          <div style="font-size:32px;margin-bottom:8px;">&#9989;</div>
+          <p class="font-semibold mb-4">Closing deck ready</p>
+          <a href="${url}" target="_blank" class="btn btn-primary" style="text-decoration:none;">&#128202; Open PPTX</a>
+          ${warning}
+        </div>`;
+    }
+    showToast('Closing deck ready', 'success');
+  } catch (e) {
+    showToast('Could not build the deck: ' + (e.message || 'Unknown error'), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // -------- LEDGER: DASHBOARD --------
@@ -1110,60 +1185,70 @@ function uploadReportLogo(input) {
   input.value = '';
 }
 
+// reportWizardPayload builds the engagement payload the server renders from.
+//
+// Both the report and the closing deck post exactly this. Building it in one
+// place is what stops the deck and the report disagreeing about the client name,
+// the dates, which findings were included, or which evidence is attached to
+// them - a disagreement nobody would notice until it was in front of the client.
+function reportWizardPayload() {
+  const splitLines = v => (v ? v.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : []);
+  const cleanAccounts = rows => rows
+    .map(r => ({ account: (r.account || '').trim(), credentials: (r.credentials || '').trim() }))
+    .filter(r => r.account || r.credentials);
+
+  const areas = selectedAreaCodes().map(code => ({ code, scope: reportWizardState.areas[code] || '' }));
+
+  const mappedFindings = reportWizardState.findings.map(f => ({
+    title: f.title || '',
+    description: f.description || '',
+    impact: f.impact || '',
+    cvss_vector: f.cvss_vector || '',
+    cvss_score: String(f.cvss_score || ''),
+    severity: f.severity || 'info',
+    affected_system: f.affected_system || f.node_id || '',
+    poc: f.poc || '',
+    recommendation: f.remediation || f.recommendation || '',
+    recommendation_header: f.recommendation_header || '',
+    attack_vector: f.attack_vector || '',
+    category: f.category || '',
+    area: reportWizardState.findingAreas[f.id] || defaultAreaFor(f),
+    exposure: f.exposure || '',
+    vuln_id: '',
+    poc_evidence_ids: Array.isArray(f.evidence_ids) ? f.evidence_ids : []
+  }));
+
+  return {
+    company_name: reportWizardState.companyName,
+    company_initials: reportWizardState.companyInitials,
+    company_logo: reportWizardState.logo || '',
+    engagement_name: reportWizardState.projectName || 'VAPT Report',
+    ref_number: reportWizardState.refNumber,
+    report_date: reportWizardState.reportDate,
+    assessment_start: reportWizardState.assessmentStart,
+    assessment_end: reportWizardState.assessmentEnd,
+    tester_name: reportWizardState.testerName,
+    approver_name: reportWizardState.approverName,
+    approver_title: reportWizardState.approverTitle,
+    version_label: reportWizardState.versionLabel,
+    areas: areas,
+    sections: selectedAreaCodes(),
+    out_of_scope: splitLines(reportWizardState.outOfScope),
+    findings: mappedFindings,
+    tools: splitLines(reportWizardState.tools),
+    test_accounts_existing: cleanAccounts(reportWizardState.accountsExisting),
+    test_accounts_created: cleanAccounts(reportWizardState.accountsCreated),
+    sync_onedrive: reportWizardState.odSync,
+    onedrive_folder: reportWizardState.odFolder || ''
+  };
+}
+
 async function generateReportDocument() {
   showToast('Compiling report document...', 'info');
   const btn = document.querySelector('[onclick="generateReportDocument()"]');
   if (btn) btn.disabled = true;
   try {
-    const splitLines = v => (v ? v.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : []);
-    const cleanAccounts = rows => rows
-      .map(r => ({ account: (r.account || '').trim(), credentials: (r.credentials || '').trim() }))
-      .filter(r => r.account || r.credentials);
-
-    const areas = selectedAreaCodes().map(code => ({ code, scope: reportWizardState.areas[code] || '' }));
-
-    const mappedFindings = reportWizardState.findings.map(f => ({
-      title: f.title || '',
-      description: f.description || '',
-      impact: f.impact || '',
-      cvss_vector: f.cvss_vector || '',
-      cvss_score: String(f.cvss_score || ''),
-      severity: f.severity || 'info',
-      affected_system: f.affected_system || f.node_id || '',
-      poc: f.poc || '',
-      recommendation: f.remediation || f.recommendation || '',
-      recommendation_header: f.recommendation_header || '',
-      attack_vector: f.attack_vector || '',
-      category: f.category || '',
-      area: reportWizardState.findingAreas[f.id] || defaultAreaFor(f),
-      exposure: f.exposure || '',
-      vuln_id: '',
-      poc_evidence_ids: Array.isArray(f.evidence_ids) ? f.evidence_ids : []
-    }));
-
-    const payload = {
-      company_name: reportWizardState.companyName,
-      company_initials: reportWizardState.companyInitials,
-      company_logo: reportWizardState.logo || '',
-      engagement_name: reportWizardState.projectName || 'VAPT Report',
-      ref_number: reportWizardState.refNumber,
-      report_date: reportWizardState.reportDate,
-      assessment_start: reportWizardState.assessmentStart,
-      assessment_end: reportWizardState.assessmentEnd,
-      tester_name: reportWizardState.testerName,
-      approver_name: reportWizardState.approverName,
-      approver_title: reportWizardState.approverTitle,
-      version_label: reportWizardState.versionLabel,
-      areas: areas,
-      sections: selectedAreaCodes(),
-      out_of_scope: splitLines(reportWizardState.outOfScope),
-      findings: mappedFindings,
-      tools: splitLines(reportWizardState.tools),
-      test_accounts_existing: cleanAccounts(reportWizardState.accountsExisting),
-      test_accounts_created: cleanAccounts(reportWizardState.accountsCreated),
-      sync_onedrive: reportWizardState.odSync,
-      onedrive_folder: reportWizardState.odFolder || ''
-    };
+    const payload = reportWizardPayload();
 
     const res = await api.post('/reports/export', payload);
     const docxUrl = res.data?.docx_url;

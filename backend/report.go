@@ -205,36 +205,7 @@ func HandleExportReport(store *Store) http.HandlerFunc {
 		}
 		normalizeReportAreas(&config)
 
-		// Resolve PoC screenshot evidence IDs to raw bytes for embedding.
-		// Missing/failed lookups are logged and skipped - the report must not
-		// fail just because one attachment is unavailable.
-		uploadsDir, uErr := ensureUploadsDir()
-		for i := range config.Findings {
-			ids := config.Findings[i].POCEvidenceIDs
-			if len(ids) == 0 {
-				continue
-			}
-			for _, id := range ids {
-				ev, err := store.GetEvidence(id)
-				if err != nil {
-					log.Printf("report: skip PoC evidence %s (%v)", id, err)
-					continue
-				}
-				if uErr != nil {
-					log.Printf("report: uploads dir unavailable: %v", uErr)
-					continue
-				}
-				filePath := filepath.Join(uploadsDir, filepath.Base(ev.StorageKey))
-				data, err := os.ReadFile(filePath)
-				if err != nil {
-					log.Printf("report: skip PoC evidence %s file missing on disk: %v", id, err)
-					continue
-				}
-				config.Findings[i].POCImages = append(config.Findings[i].POCImages, POCImage{
-					Data: data, Filename: ev.Filename, MimeType: ev.MimeType,
-				})
-			}
-		}
+		resolvePOCImages(store, &config)
 
 		reportsDir, err := ensureReportsDir()
 		if err != nil {
@@ -310,7 +281,7 @@ func HandleDownloadReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if reportType != "docx" && reportType != "pdf" {
+	if reportType != "docx" && reportType != "pdf" && reportType != "pptx" {
 		http.Error(w, "Invalid report type", http.StatusBadRequest)
 		return
 	}
@@ -336,10 +307,15 @@ func HandleDownloadReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if reportType == "pdf" {
+	switch reportType {
+	case "pdf":
 		w.Header().Set("Content-Type", "application/pdf")
-	} else if reportType == "docx" {
-		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	case "docx":
+		w.Header().Set("Content-Type",
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	case "pptx":
+		w.Header().Set("Content-Type",
+			"application/vnd.openxmlformats-officedocument.presentationml.presentation")
 	}
 	// Quoted, because the name has spaces in it.
 	w.Header().Set("Content-Disposition",
@@ -440,4 +416,108 @@ func mustReadFile(path string) []byte {
 		return nil
 	}
 	return b
+}
+
+// closureDeckResponse is what the Closure Prep page gets back.
+type closureDeckResponse struct {
+	PPTXURL string `json:"pptx_url"`
+
+	// FindingsWithoutProof names the findings that got no scenario slide,
+	// because no screenshot is attached to them in the evidence vault. They are
+	// still in the issues tables. Saying so is the point: a closing meeting
+	// walks through the scenario slides, and a finding without one is a finding
+	// nobody will see demonstrated.
+	FindingsWithoutProof []string `json:"findings_without_proof,omitempty"`
+}
+
+// HandleExportClosureDeck renders the closing-meeting deck for an engagement.
+//
+// It takes the same payload the report export does, so the deck is built from
+// exactly the findings the report is built from - including their screenshots,
+// which are resolved from the same evidence records rather than re-uploaded.
+func HandleExportClosureDeck(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var config ReportConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{
+				Error: &ApiError{Code: "INVALID_INPUT", Message: "Invalid request body"},
+			})
+			return
+		}
+		normalizeReportAreas(&config)
+		resolvePOCImages(store, &config)
+
+		reportsDir, err := ensureReportsDir()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{
+				Error: &ApiError{Code: "INTERNAL_ERROR", Message: err.Error()},
+			})
+			return
+		}
+
+		deck, notes, err := buildClosureDeck(config)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{
+				Error: &ApiError{Code: "CLOSURE_DECK_FAILED", Message: err.Error()},
+			})
+			return
+		}
+
+		baseName := reportBaseName(config) + " - Closing Meeting"
+		path := filepath.Join(reportsDir, baseName+".pptx")
+		if err := os.WriteFile(path, deck, 0644); err != nil {
+			writeJSON(w, http.StatusInternalServerError, ApiResponse{
+				Error: &ApiError{Code: "INTERNAL_ERROR", Message: "Failed to write the deck: " + err.Error()},
+			})
+			return
+		}
+		log.Printf("closure: generated %s (%d bytes)", baseName, len(deck))
+
+		response := closureDeckResponse{PPTXURL: reportDownloadURL("pptx", baseName)}
+		if notes != nil {
+			response.FindingsWithoutProof = notes.FindingsWithoutProof
+		}
+		writeJSON(w, http.StatusOK, ApiResponse{Data: response})
+	}
+}
+
+// resolvePOCImages turns each finding's evidence ids into the actual screenshot
+// bytes, ready for embedding.
+//
+// Both the DOCX report and the closing deck call this, and that is the point:
+// the proof shown for a finding in the deck is the same file as the proof in the
+// report and the same file as the record in the evidence vault. Resolving them
+// separately would let the two documents disagree about what a vulnerability
+// looked like.
+//
+// A lookup that fails is logged and skipped. One unavailable attachment must not
+// cost the whole document.
+func resolvePOCImages(store *Store, config *ReportConfig) {
+	uploadsDir, uErr := ensureUploadsDir()
+	for i := range config.Findings {
+		if len(config.Findings[i].POCEvidenceIDs) == 0 {
+			continue
+		}
+		// Rebuilt from scratch so calling this twice cannot double the images.
+		config.Findings[i].POCImages = nil
+		for _, id := range config.Findings[i].POCEvidenceIDs {
+			ev, err := store.GetEvidence(id)
+			if err != nil {
+				log.Printf("report: skip PoC evidence %s (%v)", id, err)
+				continue
+			}
+			if uErr != nil {
+				log.Printf("report: uploads dir unavailable: %v", uErr)
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(uploadsDir, filepath.Base(ev.StorageKey)))
+			if err != nil {
+				log.Printf("report: skip PoC evidence %s, file missing on disk: %v", id, err)
+				continue
+			}
+			config.Findings[i].POCImages = append(config.Findings[i].POCImages, POCImage{
+				Data: data, Filename: ev.Filename, MimeType: ev.MimeType,
+			})
+		}
+	}
 }

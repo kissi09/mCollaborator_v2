@@ -97,6 +97,10 @@ func main() {
 
 		// Reports (with document generation) — no auth required for export/download
 		r.Post("/reports/export", HandleExportReport(store))
+		// Closure decks are open to every role: preparing the closing meeting is
+		// shared work between the analysts who found the issues and whoever
+		// presents them.
+		r.Post("/reports/closure", HandleExportClosureDeck(store))
 		r.Get("/reports/download/{type}/{name}", HandleDownloadReport)
 	})
 

@@ -292,6 +292,11 @@ func findingHaystack(f ReportFinding) map[string]bool {
 // these tables are being rewritten is that nobody noticed the template asserting
 // results, and a note nobody reads would repeat the mistake in a quieter way.
 type reportNotes struct {
+	// FindingsWithoutProof names findings the closure deck could not illustrate,
+	// because they carry no evidence screenshot or because one could not be read.
+	// They still appear in the issues tables; they just get no scenario slide.
+	FindingsWithoutProof []string
+
 	// UnmatchedFindings names findings whose area has a checklist that none of
 	// its rows could be tied to. Those rows stay Pass, so the register reports a
 	// vulnerability the checklist does not account for.

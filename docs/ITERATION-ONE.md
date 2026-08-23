@@ -284,7 +284,35 @@ choice over a wizard step: zero extra clicks per report. If it ever needs to be
 a human's word, the place to add it is a review step over the derived table
 rather than a blank 194-row form.
 
-### 9.4 Report config
+### 9.4 Closure decks (pptxclosure.go, pptxslides.go)
+
+The closing meeting is presented from a deck, and it used to be rebuilt by hand
+from the report each time. `POST /api/v1/reports/closure` renders it from the
+same payload the report export takes.
+
+- **Template.** `templates/mcollaborator_closure_template.pptx`, derived by
+  `tools/mkclosuretemplate` from the deck the team already presents. Six slides:
+  title, two executive summaries, an issues table, a vulnerability scenario, and
+  a closing slide. The last two are repeated.
+- **Repeating a slide** is not like repeating a row in a DOCX. A slide is its own
+  package part, and four other parts have to agree it exists: the slide list, the
+  presentation relationships, the slide's own relationships and the content-type
+  table. `addSlideRaw` updates all four; the two template slides are dropped once
+  their clones are made, so no placeholder slide reaches the client.
+- **Grouping.** Issues tables hold four findings, split by area then severity, so
+  a slide is titled "IPT Issues - Critical Level (1/5)" rather than naming every
+  area and severity it happens to contain.
+- **Screenshots.** One scenario slide per screenshot, which is how the hand-built
+  decks read. The images come from `resolvePOCImages`, the same function the DOCX
+  report uses, so a finding's proof in the deck is the same file as its proof in
+  the report and in the evidence vault rather than a second copy that can drift.
+- **Findings without evidence** still appear in the issues tables but get no
+  scenario slide, and the response names them in `findings_without_proof`. A
+  closing meeting walks the scenario slides; a finding without one is a finding
+  nobody will see demonstrated.
+- **Access.** Open to every role, like the Closure Prep page it is reached from.
+
+### 9.5 Report config
 
 `ReportConfig` (report.go) carries company/logo/engagement meta, scope &
 out-of-scope arrays, sections, findings, tools, and the optional OneDrive sync
