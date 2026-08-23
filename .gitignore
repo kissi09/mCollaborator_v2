@@ -42,3 +42,9 @@ backend/*.pid
 # output, not project source, and must not reach a remote.
 docs/*.pptx
 docs/*Closure Report*
+
+# Desktop build output. The binaries are large and rebuildable; dist/ is where
+# build.ps1 collects the shipping artefacts.
+desktop/build/bin/
+desktop/dist/
+desktop/build/windows/installer/tmp/

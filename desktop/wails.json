@@ -1,0 +1,18 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "mCollaborator",
+  "outputfilename": "mCollaborator",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dir": "frontend",
+  "author": {
+    "name": "Cyberteq Falcon Ltd."
+  },
+  "info": {
+    "companyName": "Cyberteq Falcon Ltd.",
+    "productName": "mCollaborator",
+    "productVersion": "3.0.0.0",
+    "copyright": "Copyright (c) 2026 Cyberteq Falcon Ltd.",
+    "comments": "Vulnerability assessment and penetration testing reporting"
+  }
+}
