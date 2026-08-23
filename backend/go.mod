@@ -1,4 +1,4 @@
-module github.com/cyberteq/stitch
+module github.com/cyberteq/mcollaborator
 
 go 1.25.0
 

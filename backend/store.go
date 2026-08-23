@@ -14,43 +14,49 @@ import (
 )
 
 type Store struct {
-	mu           sync.RWMutex
-	db           *StoreDB
-	orgs         map[string]*Org
-	users        map[string]*User
-	usersByEmail map[string]*User
-	engagements  map[string]*Engagement
-	nodes        map[string]*Node
-	findings     map[string]*Finding
-	evidence     map[string]*Evidence
-	reports      map[string]*Report
+	mu            sync.RWMutex
+	db            *StoreDB
+	orgs          map[string]*Org
+	users         map[string]*User
+	usersByEmail  map[string]*User
+	engagements   map[string]*Engagement
+	nodes         map[string]*Node
+	findings      map[string]*Finding
+	evidence      map[string]*Evidence
+	reports       map[string]*Report
 	reportRecords map[string]*ReportRecord
-	auditLog     []*AuditLog
-	sessions     map[string]*Session
-	comments     map[string]*Comment
-	activities   []*ActivityItem
+	auditLog      []*AuditLog
+	sessions      map[string]*Session
+	comments      map[string]*Comment
+	activities    []*ActivityItem
 }
 
 func NewStore() *Store {
 	s := &Store{
-		orgs:         make(map[string]*Org),
-		users:        make(map[string]*User),
-		usersByEmail: make(map[string]*User),
-		engagements:  make(map[string]*Engagement),
-		nodes:        make(map[string]*Node),
-		findings:     make(map[string]*Finding),
-		evidence:     make(map[string]*Evidence),
-		reports:      make(map[string]*Report),
+		orgs:          make(map[string]*Org),
+		users:         make(map[string]*User),
+		usersByEmail:  make(map[string]*User),
+		engagements:   make(map[string]*Engagement),
+		nodes:         make(map[string]*Node),
+		findings:      make(map[string]*Finding),
+		evidence:      make(map[string]*Evidence),
+		reports:       make(map[string]*Report),
 		reportRecords: make(map[string]*ReportRecord),
 		auditLog:      make([]*AuditLog, 0),
-		sessions:     make(map[string]*Session),
-		comments:     make(map[string]*Comment),
-		activities:   make([]*ActivityItem, 0),
+		sessions:      make(map[string]*Session),
+		comments:      make(map[string]*Comment),
+		activities:    make([]*ActivityItem, 0),
 	}
 
 	// Open the SQLite persistence layer. If a snapshot already exists, load it
 	// (the data survives restarts); otherwise seed demo data and persist it.
-	dbPath := os.Getenv("STITCH_DB_PATH")
+	// STITCH_DB_PATH is still honoured. An existing deployment that sets it
+	// would otherwise fall through to the default path, open an empty database
+	// and look for all the world like it had lost every engagement.
+	dbPath := os.Getenv("MCOLLABORATOR_DB_PATH")
+	if dbPath == "" {
+		dbPath = os.Getenv("STITCH_DB_PATH")
+	}
 	if dbPath == "" {
 		dbPath = filepath.Join("data", "mcollaborator.db")
 	}
@@ -87,13 +93,18 @@ func (s *Store) seed() {
 	s.users[userID] = &User{
 		ID: userID, OrgID: orgID, Email: "admin@cyberteq.com", Name: "Admin User",
 		PasswordHash: string(bcryptHash), Role: "admin", MFAEnabled: false,
-		Permissions: []string{"finding:write", "vault:read", "vault:write", "report:export", "admin:users", "engagements:write"},
+		Permissions:    []string{"finding:write", "vault:read", "vault:write", "report:export", "admin:users", "engagements:write"},
 		CreatedAt:      now,
 		PasswordExpiry: time.Now().AddDate(0, 3, 0),
 	}
 	s.usersByEmail["admin@cyberteq.com"] = s.users[userID]
 }
 
+// hashPassword is the legacy SHA-256 scheme, kept only so accounts created
+// before bcrypt can still authenticate. The "stitch_" prefix is part of the
+// salt of hashes already stored in customer databases - renaming it to match
+// the new product name would lock every one of those accounts out. It is a
+// stored credential parameter, not a name.
 func hashPassword(password string) string {
 	h := sha256.Sum256([]byte("stitch_" + password + "_salt"))
 	return fmt.Sprintf("%x", h)
@@ -245,9 +256,15 @@ func (s *Store) ListFindings(engagementID, nodeID, severity, status string) []*F
 	var result []*Finding
 	for _, f := range s.findings {
 		if f.EngagementID == engagementID {
-			if nodeID != "" && f.NodeID != nodeID { continue }
-			if severity != "" && f.Severity != severity { continue }
-			if status != "" && f.Status != status { continue }
+			if nodeID != "" && f.NodeID != nodeID {
+				continue
+			}
+			if severity != "" && f.Severity != severity {
+				continue
+			}
+			if status != "" && f.Status != status {
+				continue
+			}
 			result = append(result, f)
 		}
 	}
@@ -361,8 +378,12 @@ func (s *Store) ListEvidence(engagementID, findingID string) []*Evidence {
 	defer s.mu.RUnlock()
 	var result []*Evidence
 	for _, ev := range s.evidence {
-		if engagementID != "" && ev.EngagementID != engagementID { continue }
-		if findingID != "" && ev.FindingID != findingID { continue }
+		if engagementID != "" && ev.EngagementID != engagementID {
+			continue
+		}
+		if findingID != "" && ev.FindingID != findingID {
+			continue
+		}
 		result = append(result, ev)
 	}
 	return result

@@ -61,7 +61,7 @@ Go backend (chi router)  :9900
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Language | Go (go 1.25) | Module `github.com/cyberteq/stitch` |
+| Language | Go (go 1.25) | Module `github.com/cyberteq/mcollaborator` |
 | Router | `go-chi/chi/v5` v5.1.0 | |
 | Persistence | `modernc.org/sqlite` v1.56.0 | Pure-Go driver — no CGO/gcc needed |
 | DOCX | `unidoc/unioffice` v1.39.0 + template merge engine | Real Word template, byte-swapped |
@@ -76,7 +76,7 @@ Go backend (chi router)  :9900
 ## 4. Repository layout
 
 ```
-stitch/
+mCollaborator/
 ├── .gitignore
 ├── docs/
 │   ├── ITERATION-ONE.md          ← this document
@@ -195,7 +195,7 @@ stitch/
 
 ## 8. Frontend (SPA)
 
-- **`state.js`** — global `STITCH` object, token/theme persistence, hash router,
+- **`state.js`** — global `MCOLLABORATOR` object, token/theme persistence, hash router,
   unified top **navbar** (Dashboard, Projects, Findings, Evidence, Reports,
   Users) plus theme switcher and logout. Routes: `/login`, `/dashboard`,
   `/ledger/project`, `/finding-editor`, `/evidence`, `/report-generator` (`/reports`),
@@ -351,7 +351,8 @@ success rather than sinking a report that is already filed.
 - **Password hashes survive.** `userSnapshot` DTO carries `PasswordHash` with a
   real JSON tag, while the live `User` keeps `json:"-"` (see §5 note).
 - **Files/locations.** Default DB path `backend/data/mcollaborator.db`
-  (plus `-wal`/`-shm`). Override with env `STITCH_DB_PATH`. The `.gitignore`
+  (plus `-wal`/`-shm`). Override with env `MCOLLABORATOR_DB_PATH` (the older `STITCH_DB_PATH` is still
+  read, so an existing deployment does not silently open an empty database). The `.gitignore`
   does **not** yet exclude the DB — add it if the data dir should not be
   committed.
 - **Concurrency model.** Single server process; the DB is not shared across
@@ -374,7 +375,7 @@ success rather than sinking a report that is already filed.
   objects (`allFindings` + `toggleWizardFinding`); the generate payload sends
   everything, including the OneDrive sync fields.
 - **Findings polling hardened.** `afterRenderProjectLedger` /
-  `showBulkImportModal` now use `STITCH.currentEngagement?.id` instead of
+  `showBulkImportModal` now use `MCOLLABORATOR.currentEngagement?.id` instead of
   fragile URL parsing.
 - **DOCX→PDF strategy.** A Word engine (Word COM / LibreOffice) is the only
   path. No engine means no PDF, said out loud - never a lookalike under the
@@ -386,11 +387,11 @@ success rather than sinking a report that is already filed.
 
 ```powershell
 # Build (from backend/)
-go build -o stitch.exe .
-go test ./...            # includes docxmerge_test.go
+go build -o mCollaborator.exe .
+go test ./...            # includes the template-render suite
 
 # Run
-.\stitch.exe             # or: PORT=9900 .\stitch.exe
+.\mCollaborator.exe      # or: PORT=9900 .\mCollaborator.exe
 # Open http://localhost:9900  → login as admin@cyberteq.com / admin123
 ```
 
@@ -407,7 +408,7 @@ Notes:
 
 ## 14. Deployment — office LAN multi-pentester
 
-- **Topology.** One Windows machine runs `stitch.exe` on TCP 9900; analysts on
+- **Topology.** One Windows machine runs `mCollaborator.exe` on TCP 9900; analysts on
   the same LAN open `http://<server-ip>:9900`.
 - **Data safety.** Restart-safe thanks to SQLite; all team changes live in one
   place and appear on others within the polling window (15 s by default).

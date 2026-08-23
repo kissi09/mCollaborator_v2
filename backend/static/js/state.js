@@ -16,19 +16,36 @@ function validateEmail(email) {
 }
 
 // mCollaborator Global State Management
-let stitchToken, stitchTheme;
-try {
-  stitchToken = localStorage.getItem('stitch_token');
-  stitchTheme = localStorage.getItem('stitch_theme') || 'insight';
-} catch (e) {
-  stitchToken = null;
-  stitchTheme = 'insight';
+
+// Storage keys were renamed with the product. Anyone signed in under the old
+// keys is migrated across on first load rather than being silently logged out
+// and losing their theme.
+const TOKEN_KEY = 'mcollaborator_token';
+const THEME_KEY = 'mcollaborator_theme';
+
+function migrateStoredKey(newKey, oldKey) {
+  const current = localStorage.getItem(newKey);
+  if (current !== null) return current;
+  const legacy = localStorage.getItem(oldKey);
+  if (legacy === null) return null;
+  localStorage.setItem(newKey, legacy);
+  localStorage.removeItem(oldKey);
+  return legacy;
 }
 
-const STITCH = {
+let storedToken, storedTheme;
+try {
+  storedToken = migrateStoredKey(TOKEN_KEY, 'stitch_token');
+  storedTheme = migrateStoredKey(THEME_KEY, 'stitch_theme') || 'insight';
+} catch (e) {
+  storedToken = null;
+  storedTheme = 'insight';
+}
+
+const MCOLLABORATOR = {
   user: null,
-  token: stitchToken,
-  theme: stitchTheme,
+  token: storedToken,
+  theme: storedTheme,
   currentRoute: '',
   currentEngagement: null,
   currentFinding: null,
@@ -43,7 +60,7 @@ const STITCH = {
         this.applyTheme();
       } catch (e) {
         this.token = null;
-        localStorage.removeItem('stitch_token');
+        localStorage.removeItem(TOKEN_KEY);
       }
     }
     this.initRouter();
@@ -51,13 +68,13 @@ const STITCH = {
 
   saveToken(token) {
     this.token = token;
-    localStorage.setItem('stitch_token', token);
+    localStorage.setItem(TOKEN_KEY, token);
   },
 
   logout() {
     this.token = null;
     this.user = null;
-    localStorage.removeItem('stitch_token');
+    localStorage.removeItem(TOKEN_KEY);
     api.post('/auth/logout').catch(() => {});
     window.location.hash = '#/login';
     this.render();
@@ -65,7 +82,7 @@ const STITCH = {
 
   setTheme(theme) {
     this.theme = theme;
-    localStorage.setItem('stitch_theme', theme);
+    localStorage.setItem(THEME_KEY, theme);
     this.applyTheme();
   },
 
@@ -194,13 +211,13 @@ const STITCH = {
             <div class="nav-links">${navTabs.join('')}</div>
           </div>
           <div class="nav-right">
-            <select class="nav-select" onchange="STITCH.setTheme(this.value)">
-              <option value="cyberpunk" ${STITCH.theme === 'cyberpunk' ? 'selected' : ''}>Cyberpunk</option>
-              <option value="ledger" ${STITCH.theme === 'ledger' ? 'selected' : ''}>Ledger</option>
-              <option value="insight" ${STITCH.theme === 'insight' ? 'selected' : ''}>Slate</option>
+            <select class="nav-select" onchange="MCOLLABORATOR.setTheme(this.value)">
+              <option value="cyberpunk" ${MCOLLABORATOR.theme === 'cyberpunk' ? 'selected' : ''}>Cyberpunk</option>
+              <option value="ledger" ${MCOLLABORATOR.theme === 'ledger' ? 'selected' : ''}>Ledger</option>
+              <option value="insight" ${MCOLLABORATOR.theme === 'insight' ? 'selected' : ''}>Slate</option>
             </select>
-            <span class="nav-user">${STITCH.user?.name || ''}</span>
-            <button class="btn btn-ghost text-sm" onclick="STITCH.logout()">Logout</button>
+            <span class="nav-user">${MCOLLABORATOR.user?.name || ''}</span>
+            <button class="btn btn-ghost text-sm" onclick="MCOLLABORATOR.logout()">Logout</button>
           </div>
         </nav>
         <div class="content">

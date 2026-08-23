@@ -1,6 +1,9 @@
 # Build artifacts
 *.exe
 *.exe~
+backend/mCollaborator.exe
+backend/mCollaborator.exe~
+# Pre-rename binaries, so a leftover copy is never committed either
 backend/stitch.exe
 backend/stitch.exe~
 
@@ -12,6 +15,8 @@ backend/reports/
 
 # Logs
 *.log
+mCollaborator-out.log
+mCollaborator-err.log
 stitch-out.log
 stitch-err.log
 

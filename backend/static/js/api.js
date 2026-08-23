@@ -4,8 +4,8 @@ const BASE = '/api/v1';
 const api = {
   async request(method, path, body) {
     const headers = { 'Content-Type': 'application/json' };
-    if (STITCH.token) {
-      headers['Authorization'] = `Bearer ${STITCH.token}`;
+    if (MCOLLABORATOR.token) {
+      headers['Authorization'] = `Bearer ${MCOLLABORATOR.token}`;
     }
     const opts = { method, headers };
     if (body && method !== 'GET') {
@@ -20,7 +20,7 @@ const api = {
       return data;
     } catch (e) {
       if (e.message.includes('401') || e.message.includes('Unauthorized')) {
-        STITCH.logout();
+        MCOLLABORATOR.logout();
       }
       throw e;
     }
@@ -34,8 +34,8 @@ const api = {
 
   async upload(path, formData) {
     const headers = {};
-    if (STITCH.token) {
-      headers['Authorization'] = `Bearer ${STITCH.token}`;
+    if (MCOLLABORATOR.token) {
+      headers['Authorization'] = `Bearer ${MCOLLABORATOR.token}`;
     }
     const res = await fetch(`${BASE}${path}`, { method: 'POST', headers, body: formData });
     const data = await res.json();

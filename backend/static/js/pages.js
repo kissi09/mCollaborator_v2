@@ -40,9 +40,9 @@ async function handleLogin(e) {
   const safeEmail = sanitizeInput(email);
   try {
     const res = await api.post('/auth/login', { email: safeEmail, password });
-    STITCH.saveToken(res.data.token);
-    STITCH.user = res.data.user;
-    window.location.hash = STITCH.user.must_change_password ? '#/change-password' : '#/dashboard';
+    MCOLLABORATOR.saveToken(res.data.token);
+    MCOLLABORATOR.user = res.data.user;
+    window.location.hash = MCOLLABORATOR.user.must_change_password ? '#/change-password' : '#/dashboard';
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -56,7 +56,7 @@ function renderChangePassword() {
         <img src="/images/cyberteq-mark.png" alt="" class="brand-mark brand-mark-lg">
         <div>
           <h1 style="margin:0;">Set New Password</h1>
-          <p style="margin:0;">${sanitizeInput(STITCH.user?.name || '')}</p>
+          <p style="margin:0;">${sanitizeInput(MCOLLABORATOR.user?.name || '')}</p>
         </div>
       </div>
       <p>You must set a new password before continuing. It stays valid for 90 days.</p>
@@ -88,9 +88,9 @@ async function handleChangePassword(e) {
   }
   try {
     await api.post('/users/me/password', { current_password: current, new_password: next });
-    STITCH.user.must_change_password = false;
+    MCOLLABORATOR.user.must_change_password = false;
     showToast('Password updated', 'success');
-    STITCH.navigate('#/dashboard');
+    MCOLLABORATOR.navigate('#/dashboard');
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -201,7 +201,7 @@ async function afterRenderLedgerDashboard() {
       `${completed.length} in the last 90 days`;
 
     document.getElementById('ledger-project-list').innerHTML = active.length ? active.map(e => `
-      <a class="flex items-start gap-4 p-4 card mb-3" style="cursor:pointer;" onclick="STITCH.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
+      <a class="flex items-start gap-4 p-4 card mb-3" style="cursor:pointer;" onclick="MCOLLABORATOR.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
         <div class="flex-1">
           <div class="flex items-center gap-3 mb-1">
             <h4 class="font-display font-bold" style="font-size:15px;">${e.name}</h4>
@@ -221,7 +221,7 @@ async function afterRenderLedgerDashboard() {
     `).join('') : '<p class="text-sm text-muted">No active projects.</p>';
 
     document.getElementById('ledger-completed-list').innerHTML = completed.length ? completed.map(e => `
-      <a class="flex items-start gap-4 p-4 card mb-3" style="cursor:pointer;opacity:0.85;" onclick="STITCH.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
+      <a class="flex items-start gap-4 p-4 card mb-3" style="cursor:pointer;opacity:0.85;" onclick="MCOLLABORATOR.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
         <div class="flex-1">
           <div class="flex items-center gap-3 mb-1">
             <h4 class="font-display font-bold" style="font-size:15px;">${e.name}</h4>
@@ -268,7 +268,7 @@ function renderProjectLedger() {
           <h4 class="font-display font-bold">Findings</h4>
           ${canWriteFindings() ? `
             <button class="btn btn-sm btn-ghost" onclick="showBulkImportModal()">+ Bulk Import</button>
-            <button class="btn btn-primary" onclick="STITCH.currentFinding=null;STITCH.navigate('#/finding-editor')">+ New Finding</button>` : ''}
+            <button class="btn btn-primary" onclick="MCOLLABORATOR.currentFinding=null;MCOLLABORATOR.navigate('#/finding-editor')">+ New Finding</button>` : ''}
         </div>
         <div id="project-findings">
           <div class="skeleton" style="height:60px;margin-bottom:8px;"></div>
@@ -286,7 +286,7 @@ function renderProjectLedger() {
 }
 
 async function afterRenderProjectLedger() {
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) {
     ['project-nodes','project-findings','project-meta'].forEach(id => {
       const el = document.getElementById(id);
@@ -295,7 +295,7 @@ async function afterRenderProjectLedger() {
     return;
   }
   try {
-    const engId = STITCH.currentEngagement.id;
+    const engId = MCOLLABORATOR.currentEngagement.id;
     const [nodesRes, findingsRes, engRes] = await Promise.all([
       api.get(`/engagements/${engId}/nodes`),
       api.get(`/engagements/${engId}/findings`),
@@ -303,13 +303,13 @@ async function afterRenderProjectLedger() {
     ]);
     const nodes = nodesRes.data || [];
     const findings = findingsRes.data || [];
-    const eng = engRes.data || STITCH.currentEngagement || {};
+    const eng = engRes.data || MCOLLABORATOR.currentEngagement || {};
 
     // The scope pane prefers persisted Node records, but falls back to the
     // engagement's scope list so targets entered at creation always show up.
     const scopeTargets = nodes.length
       ? nodes.map(n => `<div class="flex items-center gap-2 px-2 py-2" style="cursor:pointer;border-radius:var(--radius);font-family:var(--font-mono);font-size:13px;hover:background:var(--surface-hover);" onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background=''">
-        <span style="font-size:14px;color:${STITCH.theme==='cyberpunk'?'var(--primary)':STITCH.theme==='ledger'?'var(--primary)':'var(--muted)'};">●</span>
+        <span style="font-size:14px;color:${MCOLLABORATOR.theme==='cyberpunk'?'var(--primary)':MCOLLABORATOR.theme==='ledger'?'var(--primary)':'var(--muted)'};">●</span>
         ${sanitizeInput(n.target)}
         <span class="text-xs text-muted">(${sanitizeInput(n.type || '')})</span>
       </div>`)
@@ -322,7 +322,7 @@ async function afterRenderProjectLedger() {
       scopeTargets.length ? scopeTargets.join('') : '<p class="text-sm text-muted">No scope defined.</p>';
 
     document.getElementById('project-findings').innerHTML = findings.map(f => `
-      <div class="flex items-start gap-3 p-3 card mb-2" style="cursor:pointer;" onclick="STITCH.navigate('#/finding-detail',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})">
+      <div class="flex items-start gap-3 p-3 card mb-2" style="cursor:pointer;" onclick="MCOLLABORATOR.navigate('#/finding-detail',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})">
         <div class="badge-severity ${f.severity}" style="flex-shrink:0;width:48px;text-align:center;">${f.cvss_score||''}</div>
         <div class="flex-1">
           <div class="flex items-center justify-between">
@@ -387,8 +387,8 @@ async function markEngagementCompleted(engId) {
       team: eng.team
     });
     showToast('Project marked as completed', 'success');
-    STITCH.currentEngagement = null;
-    STITCH.navigate('#/dashboard');
+    MCOLLABORATOR.currentEngagement = null;
+    MCOLLABORATOR.navigate('#/dashboard');
   } catch (e) {
     showToast(e.message, 'error');
   }
@@ -491,7 +491,7 @@ Response: HTTP 200 with admin session token</textarea>
           <p>The authentication endpoint is vulnerable to SQL injection...</p>
         </div>
         <div style="padding:12px 24px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;background:var(--surface);">
-          <button class="btn btn-secondary" onclick="STITCH.navigate('#/ledger/project')">Discard</button>
+          <button class="btn btn-secondary" onclick="MCOLLABORATOR.navigate('#/ledger/project')">Discard</button>
           <button class="btn btn-primary" onclick="saveFindingFromEditor()">Publish to Ledger</button>
         </div>
       </div>
@@ -501,7 +501,7 @@ Response: HTTP 200 with admin session token</textarea>
 
 // Save the finding editor form to the current engagement via the API.
 async function saveFindingFromEditor() {
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) {
     showToast('No engagement selected. Open a project first.', 'error');
     return;
@@ -529,16 +529,16 @@ async function saveFindingFromEditor() {
     evidence_ids: getPocEvidenceIds()
   };
   try {
-    const isEdit = !!STITCH.currentFinding?.id;
+    const isEdit = !!MCOLLABORATOR.currentFinding?.id;
     let res;
     if (isEdit) {
-      res = await api.put(`/findings/${STITCH.currentFinding.id}`, payload);
+      res = await api.put(`/findings/${MCOLLABORATOR.currentFinding.id}`, payload);
     } else {
       res = await api.post(`/engagements/${engId}/findings`, payload);
     }
     showToast('Finding published to ledger', 'success');
-    STITCH.currentFinding = res.data;
-    STITCH.navigate('#/ledger/project');
+    MCOLLABORATOR.currentFinding = res.data;
+    MCOLLABORATOR.navigate('#/ledger/project');
   } catch (e) {
     showToast('Failed to save finding: ' + e.message, 'error');
   }
@@ -572,7 +572,7 @@ function renderEvidenceVault() {
 
 async function afterRenderEvidenceVault() {
   try {
-    const engId = STITCH.currentEngagement?.id;
+    const engId = MCOLLABORATOR.currentEngagement?.id;
     const res = await api.get(engId ? `/evidence?engagement_id=${encodeURIComponent(engId)}` : '/evidence');
     const items = res.data || [];
     const rows = document.getElementById('evidence-rows');
@@ -602,7 +602,7 @@ async function afterRenderEvidenceVault() {
 async function handleUpload(input) {
   const files = input.files;
   if (!files.length) return;
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) { showToast('No engagement selected. Open a project first.', 'error'); return; }
   for (const file of files) {
     const formData = new FormData();
@@ -616,7 +616,7 @@ async function handleUpload(input) {
       showToast(`Failed to upload ${file.name}`, 'error');
     }
   }
-  STITCH.render();
+  MCOLLABORATOR.render();
 }
 
 // -------- LEDGER: REPORT GENERATOR WIZARD --------
@@ -1008,7 +1008,7 @@ function defaultAreaFor(finding) {
 }
 
 function loadWizardFindings() {
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   const container = document.getElementById('wizard-findings-list');
   if (!container) return;
   if (!engId) {
@@ -1267,7 +1267,7 @@ function renderFindingDetail() {
 }
 
 async function afterRenderFindingDetail() {
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) {
     const list = document.getElementById('analyzer-list');
     if (list) list.innerHTML = '<p class="text-muted p-4">No engagement selected.</p>';
@@ -1334,7 +1334,7 @@ async function showFindingDetail(findingId) {
           </div>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:16px;">
-          ${canWriteFindings() ? `<button class="btn btn-secondary" onclick="STITCH.currentFinding=${JSON.stringify(f).replace(/"/g,'&quot;')};STITCH.navigate('#/finding-editor')">✏️ Edit Finding</button>` : ''}
+          ${canWriteFindings() ? `<button class="btn btn-secondary" onclick="MCOLLABORATOR.currentFinding=${JSON.stringify(f).replace(/"/g,'&quot;')};MCOLLABORATOR.navigate('#/finding-editor')">✏️ Edit Finding</button>` : ''}
           ${isAdmin() ? `<button class="btn btn-danger" onclick="deleteFinding('${f.id}')">Delete Finding</button>` : ''}
         </div>
         <div style="border-bottom:1px solid var(--border);margin-bottom:24px;">
@@ -1355,7 +1355,7 @@ async function showFindingDetail(findingId) {
         ${f.poc ? `
         <div class="mb-6">
           <h3 class="font-display font-bold mb-3">Proof of Concept</h3>
-          <div id="poc-content" style="background:${STITCH.theme==='insight'?'#0B1120':'var(--bg)'};padding:16px;border-radius:var(--radius);font-size:13px;line-height:1.7;"></div>
+          <div id="poc-content" style="background:${MCOLLABORATOR.theme==='insight'?'#0B1120':'var(--bg)'};padding:16px;border-radius:var(--radius);font-size:13px;line-height:1.7;"></div>
         </div>` : ''}
         ${(Array.isArray(f.evidence_ids) && f.evidence_ids.length) ? `
         <div class="mb-6">
@@ -1401,8 +1401,8 @@ async function deleteFinding(findingId) {
   try {
     await api.del('/findings/' + findingId);
     showToast('Finding deleted', 'success');
-    STITCH.currentFinding = null;
-    STITCH.navigate('#/ledger/project');
+    MCOLLABORATOR.currentFinding = null;
+    MCOLLABORATOR.navigate('#/ledger/project');
   } catch (e) {
     showToast(e.message, 'error');
   }
@@ -1489,7 +1489,7 @@ async function showEngagementDetail(engId) {
             ${(eng.scope?.included || []).map(s => `<div class="mb-1">● ${s}</div>`).join('') || 'No scope defined'}
           </div>
         </div>
-        <button class="btn btn-primary" onclick="STITCH.navigate('#/command/report-builder',{engagement:${JSON.stringify(eng).replace(/"/g,'&quot;')}})">Build Report</button>
+        <button class="btn btn-primary" onclick="MCOLLABORATOR.navigate('#/command/report-builder',{engagement:${JSON.stringify(eng).replace(/"/g,'&quot;')}})">Build Report</button>
       </div>
     `;
   } catch (e) {
@@ -1540,7 +1540,7 @@ function renderVulnerabilityFeed() {
 }
 
 async function afterRenderVulnerabilityFeed() {
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   const tbody = document.getElementById('vuln-feed-body');
   if (!tbody) return;
   if (!engId) {
@@ -1557,7 +1557,7 @@ async function afterRenderVulnerabilityFeed() {
       return;
     }
     tbody.innerHTML = findings.map(f => `
-      <tr class="clickable-row ${f.severity === 'critical' ? 'vuln-critical' : ''}" onclick="STITCH.navigate('#/finding-detail',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})"
+      <tr class="clickable-row ${f.severity === 'critical' ? 'vuln-critical' : ''}" onclick="MCOLLABORATOR.navigate('#/finding-detail',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})"
           style="${f.severity === 'critical' ? 'animation: pulseCritical 2s infinite;' : ''}">
         <td><span class="badge-severity ${f.severity}" style="display:block;text-align:center;">[${f.severity.toUpperCase().slice(0,4)}]</span></td>
         <td class="font-semibold" style="font-size:13px;font-family:var(--font-mono);">${f.title}</td>
@@ -1589,10 +1589,10 @@ function renderCommandReportBuilder() {
       <div class="flex-1 overflow-y-auto p-8">
         <div class="report-canvas" id="report-canvas">
           <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:24px;">
-            <h1 class="font-display font-bold" style="font-size:28px;">${STITCH.currentEngagement?.name || 'Project X'} — Assessment Report</h1>
+            <h1 class="font-display font-bold" style="font-size:28px;">${MCOLLABORATOR.currentEngagement?.name || 'Project X'} — Assessment Report</h1>
           </div>
           <h2 class="font-display font-bold" style="font-size:20px;color:var(--primary);margin-bottom:16px;">Executive Summary</h2>
-          <p style="margin-bottom:24px;line-height:1.7;">This report outlines findings from the penetration test. ${STITCH.currentEngagement?.client_name || 'The assessment'} revealed critical vulnerabilities requiring immediate remediation.</p>
+          <p style="margin-bottom:24px;line-height:1.7;">This report outlines findings from the penetration test. ${MCOLLABORATOR.currentEngagement?.client_name || 'The assessment'} revealed critical vulnerabilities requiring immediate remediation.</p>
           <div id="builder-dropzone" class="hidden" style="border:2px dashed var(--primary);background:color-mix(in srgb, var(--primary) 10%, transparent);padding:24px;text-align:center;margin-bottom:24px;color:var(--primary);font-family:var(--font-mono);">
             Drop finding here to generate narrative block...
           </div>
@@ -1615,7 +1615,7 @@ function renderCommandReportBuilder() {
           </div>
         </div>
         <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;">
-        <div class="text-sm text-muted mb-2">Author: ${STITCH.user?.name || 'System'}</div>
+        <div class="text-sm text-muted mb-2">Author: ${MCOLLABORATOR.user?.name || 'System'}</div>
         <div class="text-sm text-muted font-mono mb-2">Date: ${new Date().toLocaleDateString()}</div>
         <div class="text-sm text-muted font-mono">Version: 1.0.0-draft</div>
         <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;">
@@ -1628,7 +1628,7 @@ function renderCommandReportBuilder() {
 async function afterRenderCommandReportBuilder() {
   const container = document.getElementById('builder-findings');
   if (!container) return;
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) {
     container.innerHTML = '<p class="text-sm text-muted">No engagement selected.</p>';
     return;
@@ -1658,8 +1658,8 @@ function onDragStart(event, findingId) {
 let bulkImportEngagementId = null;
 
 function showBulkImportModal() {
-  if (!STITCH.currentEngagement?.id) { showToast('No engagement selected', 'error'); return; }
-  bulkImportEngagementId = STITCH.currentEngagement.id;
+  if (!MCOLLABORATOR.currentEngagement?.id) { showToast('No engagement selected', 'error'); return; }
+  bulkImportEngagementId = MCOLLABORATOR.currentEngagement.id;
   
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -1706,7 +1706,7 @@ async function doBulkImport() {
     showToast('Imported ' + res.data.length + ' findings', 'success');
     document.getElementById('bulk-import-overlay').remove();
     // Force re-render to show new findings
-    STITCH.render();
+    MCOLLABORATOR.render();
   } catch (e) {
     showToast('Import failed: ' + e.message, 'error');
   }
@@ -1734,9 +1734,9 @@ function startFindingsPolling(engagementId) {
         lastFindingsCheck = res.data.checked_at;
         showToast(res.data.changes.length + ' finding(s) updated by other analysts', 'info');
         // Re-render to show updated findings
-        const path = STITCH.currentRoute;
+        const path = MCOLLABORATOR.currentRoute;
         if (path.includes('/ledger/' + engagementId)) {
-          STITCH.render();
+          MCOLLABORATOR.render();
         }
       }
     } catch (e) {
@@ -1789,23 +1789,23 @@ function showToast(message, type = 'info') {
 
 // -------- ROLES --------
 function isAdmin() {
-  return STITCH.user?.role === 'admin';
+  return MCOLLABORATOR.user?.role === 'admin';
 }
 
 function isProjectManager() {
-  return STITCH.user?.role === 'project_manager';
+  return MCOLLABORATOR.user?.role === 'project_manager';
 }
 
 // Whether the current user may create/edit findings. Analysts and admins work
 // findings; project managers are reporting-only.
 function canWriteFindings() {
-  return isAdmin() || STITCH.user?.role === 'analyst';
+  return isAdmin() || MCOLLABORATOR.user?.role === 'analyst';
 }
 
 // Generic permission check against the role grant list. Admins always pass.
 function hasPermission(perm) {
   if (isAdmin()) return true;
-  return (STITCH.user?.permissions || []).includes(perm);
+  return (MCOLLABORATOR.user?.permissions || []).includes(perm);
 }
 
 // -------- MODAL HELPER --------
@@ -1917,7 +1917,7 @@ async function createEngagement() {
     }
     closeModal('new-engagement-overlay');
     showToast('Project created', 'success');
-    STITCH.render();
+    MCOLLABORATOR.render();
   } catch (e) {
     showToast(e.message || 'Failed to create project', 'error');
   }
@@ -1933,7 +1933,7 @@ async function insertPocImage(input) {
     input.value = '';
     return;
   }
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) {
     showToast('No engagement selected. Open a project first.', 'error');
     input.value = '';
@@ -2007,7 +2007,7 @@ function renderPocEvidenceList() {
 // Modal picker: choose an existing evidence record from the current engagement
 // to attach as a PoC screenshot.
 function showEvidencePickerForPoc() {
-  const engId = STITCH.currentEngagement?.id;
+  const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) {
     showToast('No engagement selected. Open a project first.', 'error');
     return;
@@ -2183,7 +2183,7 @@ async function createUser() {
     await api.post('/users', { name, email, role, password });
     closeModal('invite-user-overlay');
     showToast('User added', 'success');
-    STITCH.render();
+    MCOLLABORATOR.render();
   } catch (e) {
     showToast(e.message || 'Failed to add user', 'error');
   }
@@ -2194,7 +2194,7 @@ async function deleteUser(userId) {
   try {
     await api.del('/users/' + userId);
     showToast('User removed', 'success');
-    STITCH.render();
+    MCOLLABORATOR.render();
   } catch (e) {
     showToast(e.message, 'error');
   }
@@ -2237,10 +2237,10 @@ function afterRender(path) {
   }
 }
 
-// Pre-fill the finding editor from STITCH.currentFinding (if editing an
+// Pre-fill the finding editor from MCOLLABORATOR.currentFinding (if editing an
 // existing finding) and render any attached PoC evidence thumbnails.
 function afterRenderFindingEditor() {
-  const f = STITCH.currentFinding;
+  const f = MCOLLABORATOR.currentFinding;
   if (!f) return;
   const set = (id, val) => {
     const el = document.getElementById(id);
