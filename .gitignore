@@ -32,3 +32,8 @@ backend/*.pid
 
 # Editor / pre-refactor backups kept locally
 *.bak
+
+# Client-facing deliverables kept alongside the docs. These are engagement
+# output, not project source, and must not reach a remote.
+docs/*.pptx
+docs/*Closure Report*
