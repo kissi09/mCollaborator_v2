@@ -60,6 +60,10 @@ func main() {
 		fatal("mCollaborator could not start", err)
 	}
 
+	// The window's own API. The webview cannot save a file on its own, so
+	// getting a generated report onto the disk goes through here. See reports.go.
+	app := &App{baseURL: backend.baseURL}
+
 	err = wails.Run(&options.App{
 		Title:     "mCollaborator",
 		Width:     windowWidth,
@@ -77,6 +81,11 @@ func main() {
 		},
 
 		BackgroundColour: &options.RGBA{R: 11, G: 13, B: 20, A: 1},
+
+		// Bound so the report buttons in the web app have something to call
+		// when they are running inside the window rather than a browser tab.
+		OnStartup: app.startup,
+		Bind:      []interface{}{app},
 
 		OnShutdown: func(ctx context.Context) {
 			log.Printf("window closed, stopping server")

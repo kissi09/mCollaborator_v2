@@ -161,6 +161,90 @@ function renderClosurePrep() {
   `;
 }
 
+// ---------------------------------------------------------------------------
+// Getting a generated document out of the app.
+//
+// This has to work in two shells. In a browser tab an <a download> is all it
+// takes. Inside the desktop window it is not: WebView2 turns target="_blank"
+// into a new-window request that Wails does not handle, so the click is
+// swallowed and no request ever reaches the server - the app appears to build a
+// report you cannot have. The desktop shell binds SaveReportAs and OpenReport
+// for exactly that, and they are preferred whenever they are present.
+// ---------------------------------------------------------------------------
+
+// Download URLs of the documents generated in this session, by kind. The
+// buttons carry only the kind, so a report title full of spaces and quotes
+// never has to survive a round trip through an inline onclick attribute.
+const generatedReportFiles = { docx: '', pdf: '', pptx: '' };
+
+// desktopShell is the shell's bound Go API, present only inside the .exe.
+function desktopShell() {
+  return (window.go && window.go.main && window.go.main.App) || null;
+}
+
+// reportFileName is what to save the document as: the URL's last segment is
+// the report title, and the kind is its extension.
+function reportFileName(kind) {
+  const leaf = (generatedReportFiles[kind] || '').split('/').pop() || 'report';
+  let name = leaf;
+  try { name = decodeURIComponent(leaf); } catch (e) { /* keep the raw leaf */ }
+  return `${name}.${kind}`;
+}
+
+// reportFileButtons records the download URL and renders the pair of buttons
+// that act on it.
+function reportFileButtons(kind, url, icon, label) {
+  generatedReportFiles[kind] = url;
+  const style = 'text-decoration:none;margin:0 8px 8px 0;';
+  return `
+          <button class="btn btn-primary" style="${style}" onclick="openGeneratedReport('${kind}')">${icon} Open ${label}</button>
+          <button class="btn btn-secondary" style="${style}" onclick="downloadGeneratedReport('${kind}')">&#11015; Download ${label}</button>`;
+}
+
+// downloadGeneratedReport puts the document on disk.
+async function downloadGeneratedReport(kind) {
+  const url = generatedReportFiles[kind];
+  if (!url) return;
+  const name = reportFileName(kind);
+  const shell = desktopShell();
+
+  if (shell && shell.SaveReportAs) {
+    try {
+      const path = await shell.SaveReportAs(url, name);
+      // An empty path is the save dialog being cancelled, which is not news.
+      if (path) showToast(`Saved to ${path}`, 'success');
+    } catch (e) {
+      showToast(`Could not save the ${kind.toUpperCase()}: ${e}`, 'error');
+    }
+    return;
+  }
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+// openGeneratedReport hands the document to whatever the machine opens it
+// with - Word, PowerPoint, the PDF viewer.
+async function openGeneratedReport(kind) {
+  const url = generatedReportFiles[kind];
+  if (!url) return;
+  const shell = desktopShell();
+
+  if (shell && shell.OpenReport) {
+    try {
+      await shell.OpenReport(url, reportFileName(kind));
+    } catch (e) {
+      showToast(`Could not open the ${kind.toUpperCase()}: ${e}`, 'error');
+    }
+    return;
+  }
+  window.open(url, '_blank');
+}
+
 // generateClosureDeck posts the wizard's engagement to the closure endpoint and
 // shows the result, including which findings will have no scenario slide.
 async function generateClosureDeck() {
@@ -171,9 +255,15 @@ async function generateClosureDeck() {
     const res = await api.post('/reports/closure', reportWizardPayload());
     const url = res.data?.pptx_url;
     const unproven = res.data?.findings_without_proof || [];
+    const deckLogoError = res.data?.logo_error;
 
     const box = document.getElementById('closure-result');
     if (box) {
+      const logoWarning = deckLogoError ? `
+        <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
+          &#9888; The client logo is not on the title slide: ${sanitizeInput(deckLogoError)}
+        </div>` : '';
+
       const warning = unproven.length ? `
         <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
           &#9888; ${unproven.length} finding${unproven.length === 1 ? ' has' : 's have'} no evidence attached, so
@@ -185,8 +275,9 @@ async function generateClosureDeck() {
         <div style="text-align:center;padding:24px 0;">
           <div style="font-size:32px;margin-bottom:8px;">&#9989;</div>
           <p class="font-semibold mb-4">Closing deck ready</p>
-          <a href="${url}" target="_blank" class="btn btn-primary" style="text-decoration:none;">&#128202; Open PPTX</a>
+          ${reportFileButtons('pptx', url, '&#128202;', 'PPTX')}
           ${warning}
+          ${logoWarning}
         </div>`;
     }
     showToast('Closing deck ready', 'success');
@@ -794,7 +885,7 @@ function renderReportStep1() {
         <div>
           <button class="btn btn-secondary" onclick="document.getElementById('wizard-logo-input').click()">Upload Logo</button>
           <input type="file" id="wizard-logo-input" accept="image/*" style="display:none;" onchange="uploadReportLogo(this)">
-          <div class="text-xs text-muted mt-2">PNG or JPG up to 2MB. Dropped into the customer-logo slot in the page header and scaled to 0.5in tall.</div>
+          <div class="text-xs text-muted mt-2">PNG, JPG, GIF, WEBP or SVG up to 2MB. Dropped into the customer-logo slot in the page header and scaled to 0.5in tall, and onto the closing deck's title slide.</div>
         </div>
       </div>
     </div>
@@ -1255,6 +1346,7 @@ async function generateReportDocument() {
     const pdfUrl = res.data?.pdf_url;
     const pdfError = res.data?.pdf_error;
     const unmatched = res.data?.unmatched_findings || [];
+    const logoError = res.data?.logo_error;
     const odStatus = res.data?.od_status;
     const odDocxLink = res.data?.od_docx_link;
     const odPdfLink = res.data?.od_pdf_link;
@@ -1264,8 +1356,8 @@ async function generateReportDocument() {
     const preview = document.getElementById('report-preview');
     if (preview) {
       let buttons = '';
-      if (docxUrl) buttons += `<a href="${docxUrl}" target="_blank" class="btn btn-primary" style="text-decoration:none;">📄 Open DOCX</a>`;
-      if (pdfUrl) buttons += `<a href="${pdfUrl}" target="_blank" class="btn btn-secondary" style="text-decoration:none;margin-left:8px;">📕 Open PDF</a>`;
+      if (docxUrl) buttons += reportFileButtons('docx', docxUrl, '&#128196;', 'DOCX');
+      if (pdfUrl) buttons += reportFileButtons('pdf', pdfUrl, '&#128213;', 'PDF');
 
       // A PDF is only offered when a real Word or LibreOffice layout engine
       // produced it. Anything less would not be the template.
@@ -1273,6 +1365,14 @@ async function generateReportDocument() {
         <div class="text-sm" style="margin-top:16px;color:var(--warning);">
           ⚠️ The DOCX is ready, but no PDF was produced: ${sanitizeInput(pdfError)}<br>
           <span class="text-xs">Install Microsoft Word or LibreOffice on the server, or export the DOCX to PDF yourself.</span>
+        </div>` : '';
+
+      // A logo that was uploaded but could not be embedded used to be logged on
+      // the server and dropped, which looks exactly like never uploading one.
+      const logoBlock = logoError ? `
+        <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
+          &#9888; The client logo could not be added to the page header: ${sanitizeInput(logoError)}<br>
+          <span class="text-xs">The report is complete otherwise. Re-upload the logo as a PNG or JPG and generate again.</span>
         </div>` : '';
 
       // Every test-type row a finding could not be tied to reads Pass. That is
@@ -1322,6 +1422,7 @@ async function generateReportDocument() {
           <div style="display:flex;gap:12px;justify-content:center;">${buttons}</div>
           ${pdfBlock}
           ${unmatchedBlock}
+          ${logoBlock}
           ${odBlock}
         </div>
       `;

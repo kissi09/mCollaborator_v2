@@ -75,9 +75,17 @@ try {
 } finally { Pop-Location }
 
 # --- 3. the app, and the installer -----------------------------------------
-$haveNsis = $null -ne (Get-Command makensis -ErrorAction SilentlyContinue) -or
-            (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe") -or
-            (Test-Path "$env:ProgramFiles\NSIS\makensis.exe")
+# NSIS installs outside PATH by default, and `wails build -nsis` only warns when
+# it cannot find makensis - it still exits 0. The collect step would then copy
+# whatever installer the previous run left in build\bin, so dist/ ends up with a
+# fresh app beside a stale installer and nothing said about it.
+$nsisDirs = @("${env:ProgramFiles(x86)}\NSIS", "$env:ProgramFiles\NSIS")
+if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+    foreach ($dir in $nsisDirs) {
+        if (Test-Path (Join-Path $dir 'makensis.exe')) { $env:Path = "$env:Path;$dir"; break }
+    }
+}
+$haveNsis = $null -ne (Get-Command makensis -ErrorAction SilentlyContinue)
 
 Push-Location $root
 try {
@@ -93,6 +101,17 @@ try {
         & wails build -platform windows/amd64 -skipbindings
     }
     if ($LASTEXITCODE -ne 0) { throw 'wails build failed' }
+
+    # A missing makensis is a warning, not a failure, so the only proof the
+    # installer was really rebuilt is that it is newer than the app beside it.
+    if ($haveNsis -and -not $NoInstaller) {
+        $app = Get-Item (Join-Path $binDir 'mCollaborator.exe')
+        $installer = Get-ChildItem $binDir -Filter '*installer.exe' -ErrorAction SilentlyContinue |
+                     Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($null -eq $installer -or $installer.LastWriteTime -lt $app.LastWriteTime) {
+            throw 'the installer was not rebuilt, so dist/ would have taken a stale one'
+        }
+    }
 } finally { Pop-Location }
 
 # --- collect ---------------------------------------------------------------
