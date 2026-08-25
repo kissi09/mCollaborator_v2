@@ -56,6 +56,7 @@ func mergeMCollaboratorDocx(config ReportConfig) ([]byte, *reportNotes, error) {
 	logo, err := renderHeaderLogo(config.CompanyLogo)
 	if err != nil {
 		log.Printf("report: ignoring client logo (%v)", err)
+		notes.LogoError = err.Error()
 		logo = nil
 	}
 

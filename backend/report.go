@@ -118,6 +118,12 @@ type exportReportResponse struct {
 	// checklist does not - worth a person's eyes before the report goes out.
 	UnmatchedFindings []string `json:"unmatched_findings,omitempty"`
 
+	// LogoError explains why the uploaded logo is not in the header. The report
+	// is still returned; it just carries Cyberteq's logo alone where the
+	// client's should sit beside it, and the wizard says so rather than letting
+	// an empty header pass for a design decision.
+	LogoError string `json:"logo_error,omitempty"`
+
 	// OneDrive sync outcome: "ok", "failed" or "not_configured".
 	ODStatus   string `json:"od_status,omitempty"`
 	ODDOCXLink string `json:"od_docx_link,omitempty"`
@@ -262,6 +268,9 @@ func HandleExportReport(store *Store) http.HandlerFunc {
 			response.UnmatchedFindings = notes.UnmatchedFindings
 			log.Printf("report: %s - %d finding(s) matched no test in their area's checklist: %s",
 				baseName, len(notes.UnmatchedFindings), strings.Join(notes.UnmatchedFindings, "; "))
+		}
+		if notes != nil && notes.LogoError != "" {
+			response.LogoError = notes.LogoError
 		}
 
 		if config.SyncOneDrive {
@@ -428,6 +437,9 @@ type closureDeckResponse struct {
 	// walks through the scenario slides, and a finding without one is a finding
 	// nobody will see demonstrated.
 	FindingsWithoutProof []string `json:"findings_without_proof,omitempty"`
+
+	// LogoError explains why the client's logo is not on the title slide.
+	LogoError string `json:"logo_error,omitempty"`
 }
 
 // HandleExportClosureDeck renders the closing-meeting deck for an engagement.
@@ -476,6 +488,10 @@ func HandleExportClosureDeck(store *Store) http.HandlerFunc {
 		response := closureDeckResponse{PPTXURL: reportDownloadURL("pptx", baseName)}
 		if notes != nil {
 			response.FindingsWithoutProof = notes.FindingsWithoutProof
+			response.LogoError = notes.LogoError
+			if notes.LogoError != "" {
+				log.Printf("closure: %s - client logo not embedded: %s", baseName, notes.LogoError)
+			}
 		}
 		writeJSON(w, http.StatusOK, ApiResponse{Data: response})
 	}

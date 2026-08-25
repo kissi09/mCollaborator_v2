@@ -10,6 +10,10 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"strings"
+
+	"github.com/srwiley/oksvg"
+	"github.com/srwiley/rasterx"
+	_ "golang.org/x/image/webp"
 )
 
 // The VAPT template carries the previous client's logo as word/media/image1.png.
@@ -26,9 +30,39 @@ const (
 	clientLogoSlotH = 152
 )
 
+// svgRasterHeight is the height an SVG logo is rasterised at. The header prints
+// the logo half an inch tall, so this is roughly eight times the resolution it
+// is displayed at - enough that it stays sharp if someone zooms the PDF or
+// reuses the header artwork at a larger size, without carrying a needless
+// megabyte through the package.
+const svgRasterHeight = 320
+
 // decodeUploadedImage accepts either a bare base64 payload or a full
 // "data:image/png;base64,...." URI as produced by the report wizard's FileReader.
+//
+// PNG, JPEG, GIF, WEBP and SVG are all accepted, because all of them are what a
+// client sends when asked for their logo - a bank's press kit is usually SVG,
+// and a logo saved off a web page is often WEBP. Neither decodes through the
+// standard library, and until they did, the wizard accepted the upload, showed
+// it in the preview (the browser can read both), and then produced a report with
+// no logo in it at all and nothing on screen to say why.
 func decodeUploadedImage(payload string) (image.Image, error) {
+	raw, err := decodeUploadedBytes(payload)
+	if err != nil {
+		return nil, err
+	}
+	if isSVG(raw) {
+		return rasterizeSVG(raw)
+	}
+	img, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("decode logo image: %w", err)
+	}
+	return img, nil
+}
+
+// decodeUploadedBytes strips any data-URI wrapper and returns the raw file.
+func decodeUploadedBytes(payload string) ([]byte, error) {
 	s := strings.TrimSpace(payload)
 	if i := strings.Index(s, ","); i >= 0 && strings.HasPrefix(s, "data:") {
 		s = s[i+1:]
@@ -44,11 +78,44 @@ func decodeUploadedImage(payload string) (image.Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode logo base64: %w", err)
 	}
-	img, _, err := image.Decode(bytes.NewReader(raw))
-	if err != nil {
-		return nil, fmt.Errorf("decode logo image: %w", err)
+	return raw, nil
+}
+
+// isSVG reports whether the upload is SVG source rather than a raster image.
+// The file may open with an XML declaration, a doctype or a comment before the
+// root element, so the whole head of it is searched rather than just the start.
+func isSVG(raw []byte) bool {
+	head := raw
+	if len(head) > 1024 {
+		head = head[:1024]
 	}
-	return img, nil
+	return bytes.Contains(bytes.ToLower(head), []byte("<svg"))
+}
+
+// rasterizeSVG renders SVG source to a transparent RGBA image, scaled so its
+// height is svgRasterHeight and its aspect ratio is the one the drawing
+// declares.
+func rasterizeSVG(raw []byte) (image.Image, error) {
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(raw), oksvg.WarnErrorMode)
+	if err != nil {
+		return nil, fmt.Errorf("read logo svg: %w", err)
+	}
+	vb := icon.ViewBox
+	if vb.W <= 0 || vb.H <= 0 {
+		return nil, fmt.Errorf("logo svg declares no size")
+	}
+
+	h := svgRasterHeight
+	w := int(float64(h) * vb.W / vb.H)
+	if w < 1 {
+		w = 1
+	}
+
+	icon.SetTarget(0, 0, float64(w), float64(h))
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	scanner := rasterx.NewScannerGV(w, h, dst, dst.Bounds())
+	icon.Draw(rasterx.NewDasher(w, h, scanner), 1.0)
+	return dst, nil
 }
 
 // resizeBilinear scales src to exactly w x h using bilinear interpolation.

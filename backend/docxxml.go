@@ -442,3 +442,53 @@ func setFirstEmptyParaText(frag, text string) (string, bool) {
 	}
 	return frag, false
 }
+
+// ---------------------------------------------------------------------------
+// run colour
+// ---------------------------------------------------------------------------
+
+var runColorRe = regexp.MustCompile(`<w:color [^>]*/>`)
+
+// rPrColorFollowers are the CT_RPr children that the schema orders *after*
+// <w:color>. A colour is inserted before the first of these that the run
+// already carries, so the properties stay in schema order and Word does not
+// offer to repair the file.
+var rPrColorFollowers = []string{
+	"<w:spacing", "<w:w ", "<w:w/", "<w:kern", "<w:position", "<w:sz",
+	"<w:szCs", "<w:highlight", "<w:u ", "<w:u/", "<w:effect", "<w:bdr",
+	"<w:shd", "<w:fitText", "<w:vertAlign", "<w:rtl", "<w:cs", "<w:em",
+	"<w:lang", "<w:eastAsianLayout", "<w:specVanish", "<w:oMath",
+}
+
+// withRunColor returns rPr with the text colour set to hex, replacing any
+// colour already there. An empty rPr becomes a minimal one, so callers can hand
+// it straight to runsForText.
+func withRunColor(rPr, hex string) string {
+	color := `<w:color w:val="` + hex + `"/>`
+	if strings.TrimSpace(rPr) == "" {
+		return `<w:rPr>` + color + `</w:rPr>`
+	}
+	if runColorRe.MatchString(rPr) {
+		return runColorRe.ReplaceAllString(rPr, color)
+	}
+	for _, tag := range rPrColorFollowers {
+		if i := strings.Index(rPr, tag); i >= 0 {
+			return rPr[:i] + color + rPr[i:]
+		}
+	}
+	if i := strings.LastIndex(rPr, "</w:rPr>"); i >= 0 {
+		return rPr[:i] + color + rPr[i:]
+	}
+	return rPr
+}
+
+// setParaTextColored rebuilds a paragraph so it reads exactly text, in the
+// given colour, keeping every other run property the template gave it.
+func setParaTextColored(para, text, hex string) string {
+	gt := strings.Index(para, ">")
+	if gt < 0 {
+		return para
+	}
+	return para[:gt+1] + paraPPr(para) +
+		runsForText(withRunColor(paraFirstRPr(para), hex), text) + `</w:p>`
+}

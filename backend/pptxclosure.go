@@ -84,14 +84,29 @@ func buildClosureDeck(config ReportConfig) ([]byte, *reportNotes, error) {
 
 	issuesTmpl := deck.part(issuesTemplatePart)
 	scenarioTmpl := deck.part(scenarioTemplatePart)
-	if issuesTmpl == nil || scenarioTmpl == nil {
+	summaryTmpl := deck.part(summaryTemplatePart)
+	if issuesTmpl == nil || scenarioTmpl == nil || summaryTmpl == nil {
 		return nil, nil, fmt.Errorf("the closure template is missing its repeated slides")
 	}
 	issuesRels := deck.part(relsNameFor(issuesTemplatePart))
 	scenarioRels := deck.part(relsNameFor(scenarioTemplatePart))
+	summaryRels := deck.part(relsNameFor(summaryTemplatePart))
 
-	// Fill the slides that appear once.
-	deck.fillFixedSlides(config, findings)
+	// Fill the placeholders that read the same on every slide.
+	deck.fillFixedSlides(config)
+	notes.LogoError = deck.addCustomerLogo(config.CompanyLogo)
+
+	// The executive summary: one panel per assessment area, on the scope slide
+	// and again over the headline findings, plus the two charts beside them.
+	panels := buildAreaPanels(config, findings)
+	deck.fillScopeSlide(config, panels)
+	deck.fillCharts(config, findings)
+
+	var summarySlides []string
+	for _, group := range chunkPanels(panels, summaryPanelsPerSlide) {
+		body := renderSummarySlide(string(summaryTmpl.Data), group)
+		summarySlides = append(summarySlides, deck.addSlide(body, summaryRels))
+	}
 
 	// The issues tables, in report order, four findings to a slide.
 	groups := chunkFindings(findings, issuesPerSlide)
@@ -128,13 +143,14 @@ func buildClosureDeck(config ReportConfig) ([]byte, *reportNotes, error) {
 		}
 	}
 
-	// Put the deck in order, then drop the two templates now that every clone
+	// Put the deck in order, then drop the three templates now that every clone
 	// has been taken from them.
-	if err := deck.orderSlides(issueSlides, scenarioSlides); err != nil {
+	if err := deck.orderSlides(summarySlides, issueSlides, scenarioSlides); err != nil {
 		return nil, nil, err
 	}
 	deck.dropSlide(issuesTemplatePart)
 	deck.dropSlide(scenarioTemplatePart)
+	deck.dropSlide(summaryTemplatePart)
 
 	out, err := deck.zip()
 	if err != nil {
@@ -227,7 +243,7 @@ func (d *closureDeck) addSlideRaw(body, rels string) string {
 
 	d.add(name, []byte(body))
 	if rels != "" {
-		d.add(relsNameFor(name), []byte(rels))
+		d.add(relsNameFor(name), []byte(stripNotesSlideRel(rels)))
 	}
 	d.declareContentType(name)
 	relID := d.linkFromPresentation(name)
@@ -281,9 +297,9 @@ var attrIDRe = regexp.MustCompile(`Id="([^"]+)"`)
 var attrTargetRe = regexp.MustCompile(`Target="([^"]+)"`)
 
 // orderSlides rewrites the slide list so the generated slides sit where the
-// templates they came from used to be: issues tables after the summaries,
-// scenarios after those, closing slide last.
-func (d *closureDeck) orderSlides(issueSlides, scenarioSlides []string) error {
+// templates they came from used to be: the headline-findings slides after the
+// scope slide, issues tables after those, scenarios next, closing slide last.
+func (d *closureDeck) orderSlides(summarySlides, issueSlides, scenarioSlides []string) error {
 	pres := d.part("ppt/presentation.xml")
 	presRels := d.part("ppt/_rels/presentation.xml.rels")
 	if pres == nil || presRels == nil {
@@ -304,7 +320,10 @@ func (d *closureDeck) orderSlides(issueSlides, scenarioSlides []string) error {
 			order = append(order, id)
 		}
 	}
-	for _, n := range []string{"ppt/slides/slide1.xml", "ppt/slides/slide2.xml", "ppt/slides/slide3.xml"} {
+	for _, n := range []string{"ppt/slides/slide1.xml", "ppt/slides/slide2.xml"} {
+		appendSlide(n)
+	}
+	for _, n := range summarySlides {
 		appendSlide(n)
 	}
 	for _, n := range issueSlides {
@@ -332,13 +351,56 @@ func (d *closureDeck) orderSlides(issueSlides, scenarioSlides []string) error {
 	return nil
 }
 
-// dropSlide removes a slide and every reference to it. Used on the two template
+const notesSlideRelType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide"
+
+var notesRelEntryRe = regexp.MustCompile(`<Relationship [^>]*/notesSlide"[^>]*/>`)
+
+// stripNotesSlideRel drops the speaker-notes relationship from a cloned slide's
+// relationships.
+//
+// A notes slide belongs to exactly one slide and holds a relationship pointing
+// back at it. Copying the reference into every clone left several slides
+// claiming the same notes page, and the page itself still pointing at the
+// template slide that gets deleted once the clones are made - a dangling part
+// reference, which is a file PowerPoint refuses to open rather than one it
+// opens imperfectly. The notes were written about the template's example
+// content anyway, so there is nothing to carry across.
+func stripNotesSlideRel(rels string) string {
+	return notesRelEntryRe.ReplaceAllString(rels, "")
+}
+
+// notesSlideOf returns the notes part a slide owns, or "".
+func (d *closureDeck) notesSlideOf(slidePart string) string {
+	rels := d.part(relsNameFor(slidePart))
+	if rels == nil {
+		return ""
+	}
+	m := notesRelEntryRe.FindString(string(rels.Data))
+	if m == "" {
+		return ""
+	}
+	target := submatchOf(attrTargetRe, m)
+	return "ppt/" + strings.TrimPrefix(target, "../")
+}
+
+// dropSlide removes a slide and every reference to it. Used on the template
 // slides once their clones exist, so the deck does not open on an empty
 // placeholder table.
 func (d *closureDeck) dropSlide(slidePart string) {
 	presRels := d.part("ppt/_rels/presentation.xml.rels")
 	pres := d.part("ppt/presentation.xml")
 	types := d.part("[Content_Types].xml")
+
+	// The slide's own notes page goes with it; left behind, it still points at
+	// a slide that is no longer in the package.
+	if notes := d.notesSlideOf(slidePart); notes != "" {
+		d.dropPart(notes)
+		d.dropPart(relsNameFor(notes))
+		if types != nil {
+			types.Data = []byte(regexp.MustCompile(`<Override PartName="/`+regexp.QuoteMeta(notes)+`"[^>]*/>`).
+				ReplaceAllString(string(types.Data), ""))
+		}
+	}
 
 	relID := ""
 	if presRels != nil {
@@ -370,6 +432,18 @@ func (d *closureDeck) dropSlide(slidePart string) {
 	kept := d.parts[:0]
 	for _, p := range d.parts {
 		if p.Name == slidePart || p.Name == rels {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	d.parts = kept
+}
+
+// dropPart removes one part from the package.
+func (d *closureDeck) dropPart(name string) {
+	kept := d.parts[:0]
+	for _, p := range d.parts {
+		if p.Name == name {
 			continue
 		}
 		kept = append(kept, p)

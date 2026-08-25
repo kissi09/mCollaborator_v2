@@ -108,15 +108,26 @@ func parseTestTable(tbl string) parsedTestTable {
 	return out
 }
 
+// statusHex is the colour a checklist status is printed in: green for a test
+// that passed, red for one the engagement raised a finding against. Only the
+// word is coloured - the cell keeps the template's own fill, the same way the
+// vulnerability register colours a criticality.
+func statusHex(status string) string {
+	if status == statusIssues {
+		return "C00000"
+	}
+	return "28A745"
+}
+
 // setTestStatus writes status into a checklist row's status cell, keeping the
-// cell's own paragraph and run formatting.
+// cell's own paragraph and run formatting and colouring the word itself.
 func setTestStatus(cell, status string) string {
 	paras := childElems(cell, "w:p")
 	if len(paras) == 0 {
 		return cell
 	}
 	p := paras[0]
-	return cell[:p.Start] + setParaText(cell[p.Start:p.End], status) + cell[p.End:]
+	return cell[:p.Start] + setParaTextColored(cell[p.Start:p.End], status, statusHex(status)) + cell[p.End:]
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +312,14 @@ type reportNotes struct {
 	// its rows could be tied to. Those rows stay Pass, so the register reports a
 	// vulnerability the checklist does not account for.
 	UnmatchedFindings []string
+
+	// LogoError says why an uploaded customer logo did not make it into the
+	// document. The render carries on without it - one missing logo is not worth
+	// losing a report over - but it is reported rather than logged and dropped.
+	// A logo that silently fails to appear looks exactly like one nobody
+	// uploaded, which sends whoever built the report hunting through the
+	// template for a fault that is in their image file.
+	LogoError string
 }
 
 // renderTestTypeTables rewrites the Status column of every checklist in one
