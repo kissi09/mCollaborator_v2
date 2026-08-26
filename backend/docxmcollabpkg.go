@@ -82,12 +82,19 @@ func mergeMCollaboratorDocx(config ReportConfig) ([]byte, *reportNotes, error) {
 	}
 
 	logoHeaders := map[string]bool{}
+	coverLogo := false
 	for i := range parts {
 		switch {
 		case parts[i].Name == "word/document.xml":
 			rendered, err := renderDocumentBody(string(parts[i].Data), config, findings, pocs, notes)
 			if err != nil {
 				return nil, nil, err
+			}
+			// The title page carries the logo as well as the running header:
+			// the banner artwork reserves a box for it, and a cover with the
+			// slot left empty is the first thing the client sees.
+			if logo != nil {
+				rendered, coverLogo = addCoverLogo(rendered, logo)
 			}
 			parts[i].Data = []byte(rendered)
 
@@ -141,17 +148,23 @@ func mergeMCollaboratorDocx(config ReportConfig) ([]byte, *reportNotes, error) {
 	}
 
 	// Register the new media parts with the relationship files that reference
-	// them: PoC screenshots hang off the document, the logo off every header
-	// that carried the customer-logo slot.
+	// them: PoC screenshots and the title page's logo hang off the document, the
+	// header logo off every header that carried the customer-logo slot. The one
+	// logo part serves both, since the image is the same either side.
 	var extra []pocPart
-	if len(logoHeaders) > 0 {
+	if len(logoHeaders) > 0 || coverLogo {
 		extra = append(extra, pocPart{Name: logoMediaPart, RelID: logoRelID, Data: logo.PNG})
 	}
 	extra = append(extra, pocs.parts...)
 
+	docImages := append([]pocPart(nil), pocs.parts...)
+	if coverLogo {
+		docImages = append(docImages, pocPart{Name: logoMediaPart, RelID: logoRelID})
+	}
+
 	for i := range parts {
-		if parts[i].Name == "word/_rels/document.xml.rels" && len(pocs.parts) > 0 {
-			parts[i].Data = []byte(addImageRelationships(string(parts[i].Data), pocs.parts))
+		if parts[i].Name == "word/_rels/document.xml.rels" && len(docImages) > 0 {
+			parts[i].Data = []byte(addImageRelationships(string(parts[i].Data), docImages))
 			continue
 		}
 		if header, ok := headerForRels(parts[i].Name); ok && logoHeaders[header] {
@@ -266,21 +279,42 @@ const (
 	// scaled to; logoSlotWidthEMU is the width of the reserved rectangle.
 	logoSlotHeightEMU = 457200
 	logoSlotWidthEMU  = 2442210
+
+	// The title page's orange banner reserves a box in its top left corner for
+	// the customer's logo - the "Customer logo (if applicable)" outline in the
+	// artwork the template was drawn from (docs/Title_page_logo.PNG). The banner
+	// is a table cell 7.87in x 4.21in, and these are the box's bounds inside it,
+	// measured from its top left corner, in EMU. Word positions a drawing
+	// anchored inside a table cell from that corner whatever the anchor asks to
+	// be positioned against, so this is the frame that survives.
+	coverLogoBoxLeftEMU   = 313690  // 24.7pt in from the banner's left edge
+	coverLogoBoxTopEMU    = 306070  // 24.1pt down from the top of the banner
+	coverLogoBoxWidthEMU  = 1849120 // 2.02in
+	coverLogoBoxHeightEMU = 1581150 // 1.73in
+
+	// coverLogoDocPrID is the drawing id given to the cover logo. The template's
+	// own drawings number from 1 and the header logo and PoC screenshots from
+	// 4000, so nothing collides with it.
+	coverLogoDocPrID = 4500
 )
 
 var altContentRe = regexp.MustCompile(`(?s)<mc:AlternateContent>.*?</mc:AlternateContent>`)
 
-// headerLogo is an uploaded customer logo prepared for the header slot.
+// headerLogo is an uploaded customer logo prepared for the places the report
+// shows it: the running page header and the title page's banner.
 type headerLogo struct {
-	PNG  []byte
-	CX   int64 // rendered width in EMU
-	CY   int64 // rendered height in EMU
-	seen int
+	PNG     []byte
+	CX      int64 // rendered width in the header, in EMU
+	CY      int64 // rendered height in the header, in EMU
+	CoverCX int64 // rendered width on the title page, in EMU
+	CoverCY int64 // rendered height on the title page, in EMU
+	seen    int
 }
 
 // renderHeaderLogo decodes the wizard's upload into a PNG part and works out the
 // drawing size: the template asks for a 0.5 inch tall logo, so height is fixed
-// and width follows the image's own aspect ratio (capped at the slot width).
+// and width follows the image's own aspect ratio (capped at the slot width). The
+// title page's box is far larger, so the logo is fitted to that separately.
 // Returns nil when no logo was supplied.
 func renderHeaderLogo(payload string) (*headerLogo, error) {
 	if strings.TrimSpace(payload) == "" {
@@ -305,7 +339,86 @@ func renderHeaderLogo(payload string) (*headerLogo, error) {
 		cx = logoSlotWidthEMU
 		cy = int64(float64(cx) * float64(b.Dy()) / float64(b.Dx()))
 	}
-	return &headerLogo{PNG: pngBytes, CX: cx, CY: cy}, nil
+
+	coverCX, coverCY := fitInsideEMU(b.Dx(), b.Dy(), coverLogoBoxWidthEMU, coverLogoBoxHeightEMU)
+	return &headerLogo{PNG: pngBytes, CX: cx, CY: cy, CoverCX: coverCX, CoverCY: coverCY}, nil
+}
+
+// fitInsideEMU returns the largest size a w x h pixel image can be drawn at
+// inside a boxW x boxH box without being distorted, in EMU.
+func fitInsideEMU(w, h int, boxW, boxH int64) (int64, int64) {
+	cx := boxW
+	cy := int64(float64(cx) * float64(h) / float64(w))
+	if cy > boxH {
+		cy = boxH
+		cx = int64(float64(cy) * float64(w) / float64(h))
+	}
+	return cx, cy
+}
+
+// addCoverLogo floats the customer's logo over the title page's orange banner,
+// centred in the box the banner artwork reserves for it, and reports whether it
+// found the banner to put it on.
+//
+// The drawing floats rather than joining the text flow: the banner is a picture
+// in a cell of the cover table, so a run added to that flow would move the
+// artwork instead of printing on top of it. It is anchored in the banner's own
+// paragraph - the first drawing in the document - because Word lays a drawing
+// out with the paragraph that holds it, and this is the one on the title page.
+func addCoverLogo(doc string, logo *headerLogo) (string, bool) {
+	banner := strings.Index(doc, "<w:drawing>")
+	if banner < 0 {
+		return doc, false
+	}
+	host, ok := paragraphContaining(doc, banner)
+	if !ok {
+		return doc, false
+	}
+	at, ok := runInsertPoint(doc, host)
+	if !ok {
+		return doc, false
+	}
+	x := int64(coverLogoBoxLeftEMU) + (coverLogoBoxWidthEMU-logo.CoverCX)/2
+	y := int64(coverLogoBoxTopEMU) + (coverLogoBoxHeightEMU-logo.CoverCY)/2
+	run := anchoredImageRun(logoRelID, coverLogoDocPrID, x, y, logo.CoverCX, logo.CoverCY, "Customer Logo")
+	return doc[:at] + run + doc[at:], true
+}
+
+// paragraphContaining returns the innermost <w:p> enclosing the offset at.
+func paragraphContaining(doc string, at int) (span, bool) {
+	for i := at; i > 0; {
+		i = strings.LastIndex(doc[:i], "<w:p")
+		if i < 0 {
+			break
+		}
+		if !isTagBoundary(doc[i+len("<w:p")]) {
+			continue // <w:pPr>, <w:pStyle> and the rest of the family
+		}
+		if end := elemEnd(doc, i, "w:p"); end > at {
+			return span{i, end}, true
+		}
+	}
+	return span{}, false
+}
+
+// runInsertPoint returns the offset within a paragraph at which a run may be
+// inserted: after the opening tag, and after the paragraph properties when it
+// has any, since <w:pPr> must stay first.
+func runInsertPoint(doc string, p span) (int, bool) {
+	gt := strings.IndexByte(doc[p.Start:p.End], '>')
+	if gt < 0 {
+		return 0, false
+	}
+	at := p.Start + gt + 1
+	rest := doc[at:p.End]
+	if strings.HasPrefix(rest, "<w:pPr") && len(rest) > 6 && isTagBoundary(rest[6]) {
+		end := elemEnd(doc, at, "w:pPr")
+		if end < 0 {
+			return 0, false
+		}
+		at = end
+	}
+	return at, true
 }
 
 // replaceSlot swaps the header's placeholder rectangle for the uploaded logo.

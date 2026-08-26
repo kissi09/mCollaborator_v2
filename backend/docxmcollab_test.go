@@ -297,6 +297,54 @@ func TestLogoLandsInTheHeader(t *testing.T) {
 	}
 }
 
+// TestLogoLandsOnTheTitlePage pins the cover: the banner reserves a box for the
+// customer's logo, and it has to float over the banner rather than join the text
+// flow, which would push the title block onto a second page.
+func TestLogoLandsOnTheTitlePage(t *testing.T) {
+	config := sampleConfig()
+	config.CompanyLogo = tinyPNGDataURI()
+	parts := readDocxParts(t, config)
+
+	doc := parts["word/document.xml"]
+	i := strings.Index(doc, `name="Customer Logo"`)
+	if i < 0 {
+		t.Fatalf("the title page carries no customer logo")
+	}
+	drawing := doc[:i]
+	anchor := strings.LastIndex(drawing, "<wp:anchor ")
+	if anchor < 0 || strings.LastIndex(drawing, "<wp:inline ") > anchor {
+		t.Errorf("the cover logo is in the text flow; it must be anchored to the page")
+	}
+	if !strings.Contains(doc[anchor:i], `relativeFrom="page"`) {
+		t.Errorf("the cover logo is not positioned relative to the page")
+	}
+	if !strings.Contains(doc, `r:embed="`+logoRelID+`"`) {
+		t.Errorf("the cover logo does not point at the uploaded image")
+	}
+	if rels := parts["word/_rels/document.xml.rels"]; !strings.Contains(rels, logoRelID) {
+		t.Errorf("the document references the logo without a matching relationship")
+	}
+
+	// The banner box is 2.02in x 1.73in and the logo is a 4x2 PNG, so it fits
+	// the full width of the box and must not have been stretched to its height.
+	if !strings.Contains(doc[anchor:i], `cx="1849120" cy="924560"`) {
+		t.Errorf("the cover logo was not scaled to fit the banner box; got %s",
+			doc[anchor:i])
+	}
+}
+
+// TestNoCoverLogoWhenNoLogoUploaded pins the other half: with nothing uploaded
+// the cover prints exactly as the template draws it.
+func TestNoCoverLogoWhenNoLogoUploaded(t *testing.T) {
+	parts := readDocxParts(t, sampleConfig()) // sampleConfig uploads no logo
+	if strings.Contains(parts["word/document.xml"], `name="Customer Logo"`) {
+		t.Errorf("the title page shows a customer logo that was never uploaded")
+	}
+	if _, ok := parts[logoMediaPart]; ok {
+		t.Errorf("an empty logo part was added to the package")
+	}
+}
+
 // TestLandscapeSectionSurvives pins the page setup. The vulnerability register
 // through the last assessment section is landscape in the template, and that
 // section's properties also bind those pages to the header carrying the customer
