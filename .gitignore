@@ -44,3 +44,7 @@ desktop/build/bin/
 desktop/build/windows/installer/tmp/
 
 
+
+# Python bytecode from the docs generator
+__pycache__/
+*.pyc
