@@ -78,6 +78,12 @@ Sign in with the bootstrap admin `admin@cyberteq.com`; the seeded password is in
 `backend/store.go` and should be changed on first login. Fresh installs start
 empty apart from that account — no demo data is injected.
 
+On a machine that has never run it, the short answer is that nothing needs
+installing: both binaries are statically linked Go. The two exceptions — the
+WebView2 runtime for the desktop window, and Word or LibreOffice for PDF export
+— are in [`requirements.txt`](requirements.txt), along with the commands to
+check a machine before handing it over.
+
 | Variable | Effect |
 |---|---|
 | `PORT` | Web app listen port (default `9900`) |

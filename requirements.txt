@@ -1,0 +1,156 @@
+mCollaborator - runtime requirements
+====================================================================
+What a machine needs in order to RUN the shipped .exe files.
+
+This is not a package manifest and nothing installs from it - the
+binaries are statically linked Go, so there are no libraries to
+resolve. It is the checklist for "will this run on their laptop",
+written down because the answer is mostly "yes, nothing needed" and
+the two real exceptions are easy to miss.
+
+For BUILDING from source instead, see README.md and desktop/README.md.
+
+
+--------------------------------------------------------------------
+1. REQUIRED - to run at all
+--------------------------------------------------------------------
+
+Windows 10 (1809 or later) or Windows 11, 64-bit
+    Both binaries are built for windows/amd64 only. On an ARM64
+    Windows machine they run under Microsoft's x64 emulation; they
+    are not native there.
+
+~200 MB free disk space
+    Program files, plus the SQLite database and uploaded evidence,
+    which grow with use.
+
+Write access to the data directory
+    Desktop app:  %APPDATA%\mCollaborator\
+    Web app:      data\  created beside mCollaborator.exe
+    A read-only Program Files install with no write access to
+    %APPDATA% will start and then fail on first save.
+
+That is the whole list. See section 4 for what is deliberately NOT
+needed.
+
+
+--------------------------------------------------------------------
+2. REQUIRED - for the desktop app only
+--------------------------------------------------------------------
+
+Microsoft Edge WebView2 Runtime (Evergreen)
+    The desktop window is WebView2. This is the only external
+    component either binary loads - confirmed by inspection: the
+    single non-system DLL referenced is EmbeddedBrowserWebView.dll.
+
+    Already present on:  Windows 11, and Windows 10 that has been
+                         kept up to date through Edge.
+    If missing:          the installer offers to download it. For an
+                         offline machine, install the Evergreen
+                         Standalone Installer beforehand from
+                         https://developer.microsoft.com/microsoft-edge/webview2/
+
+    Check:
+        reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv
+
+Administrator rights - to INSTALL, not to run
+    mCollaborator-amd64-installer.exe is built at machine scope, so
+    it writes to Program Files and needs elevation. The app itself
+    runs as a normal user afterwards.
+
+The web app (backend\mCollaborator.exe) needs neither of these. It
+serves a browser instead of hosting one, so any modern browser on the
+machine will do.
+
+
+--------------------------------------------------------------------
+3. REQUIRED - for PDF export only
+--------------------------------------------------------------------
+
+One of the following must be installed, or PDF export fails:
+
+    Microsoft Word          (preferred - Windows only, via COM)
+    LibreOffice 7.0+        (fallback - free, headless, no licence)
+                            https://www.libreoffice.org/download/
+
+These are NOT interchangeable in quality, and the difference is
+visible in the delivered report:
+
+    Word         Lays out the PDF with the same engine that authored
+                 the template, AND rebuilds the table of contents and
+                 the footer's company-name field. This is the only
+                 engine that refreshes those.
+    LibreOffice  Produces a correct PDF, but does not rebuild the
+                 table of contents. On a report whose sections have
+                 shifted, the contents page will be stale.
+
+Neither is needed for DOCX or PPTX output. Those are generated
+in-process and work on a bare machine - only the PDF step reaches
+out to an office suite. If neither is present the export fails with
+a clear message rather than silently shipping a degraded PDF.
+
+
+--------------------------------------------------------------------
+4. NOT REQUIRED - common assumptions that do not apply
+--------------------------------------------------------------------
+
+No Go installation           the binary is compiled and self-contained
+No Python                    despite this file's name
+No Node.js / npm             the UI has no build step; it is embedded
+                             into the binary at compile time
+No .NET runtime
+No Visual C++ Redistributable
+                             the build uses no cgo, so there is no
+                             MSVC runtime dependency. Verified: the
+                             binaries reference no msvcp140.dll or
+                             vcruntime140.dll.
+No SQLite installation       modernc.org/sqlite is a pure-Go SQLite.
+                             There is no sqlite3.dll to ship or find.
+No Git / Git LFS             LFS is needed to CLONE this repository,
+                             never to run the program
+No internet connection       the app is entirely local. The only
+                             outbound traffic is the optional OneDrive
+                             sync, and only when it is configured.
+No database server           storage is a single SQLite file
+
+
+--------------------------------------------------------------------
+5. BY BINARY
+--------------------------------------------------------------------
+
+backend\mCollaborator.exe          the web app, browse to :9900
+    Windows 10/11 x64. Nothing else.
+    Port 9900 free, or set PORT to another one.
+    Word or LibreOffice if PDFs are wanted.
+
+desktop\dist\mCollaborator.exe     the desktop window
+    The above, plus the WebView2 runtime.
+    Must sit in the same folder as mCollaborator-server.exe; it
+    runs that as a child process. Copying one without the other is
+    the most common way to break an install.
+    Picks a free loopback port automatically, so no port to reserve.
+
+desktop\dist\mCollaborator-amd64-installer.exe
+    Administrator rights. Installs both of the above and offers to
+    fetch WebView2 if it is missing.
+
+
+--------------------------------------------------------------------
+6. CHECKING A MACHINE
+--------------------------------------------------------------------
+
+    # 64-bit Windows 10/11?
+    [System.Environment]::Is64BitOperatingSystem
+    (Get-CimInstance Win32_OperatingSystem).Caption
+
+    # WebView2 present?
+    Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue |
+        Select-Object pv
+
+    # A PDF engine present?
+    (Get-Command soffice -ErrorAction SilentlyContinue).Source
+    Test-Path 'C:\Program Files\LibreOffice\program\soffice.exe'
+    New-Object -ComObject Word.Application   # errors if Word is absent
+
+    # Is the app answering?
+    Invoke-WebRequest http://localhost:9900/health -UseBasicParsing
