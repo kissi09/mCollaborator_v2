@@ -3,6 +3,12 @@
 backend/stitch.exe
 backend/stitch.exe~
 
+# build.ps1 keeps the binary it replaced as a rollback slot, and compiles to a
+# scratch name before swapping. Neither is source.
+backend/mCollaborator.prev.exe
+backend/mCollaborator.build.exe
+backend/mCollaborator.old-*.exe
+
 # Generated reports — client deliverables, never commit these.
 # They can contain real vulnerability findings and client names.
 backend/backend/reports/
