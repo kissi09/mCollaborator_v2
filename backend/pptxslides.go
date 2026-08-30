@@ -128,6 +128,140 @@ func setAFieldText(para, text string) string {
 }
 
 // ---------------------------------------------------------------------------
+// styled runs
+// ---------------------------------------------------------------------------
+
+// A cell in the issues table is not one piece of text. The source deck writes
+// the finding's title in bold, its description in plain, and labels the host
+// with a bold "Affected Host:" before the plain address - three paragraphs of
+// mixed weight in a single cell. Replacing the cell's [Issue] placeholder with
+// one joined string inherited the placeholder's own bold and printed the whole
+// lot bold, which is what made the tables read as a wall of heavy text.
+//
+// These build a paragraph run by run instead, cloning the properties off the
+// template's own run so the font, size and language survive, and setting only
+// the weight and colour that differ.
+
+var (
+	aRPrRe     = regexp.MustCompile(`(?s)<a:rPr[^>]*?(?:/>|>.*?</a:rPr>)`)
+	aRPrOpenRe = regexp.MustCompile(`^<a:rPr[^>]*?/?>`)
+	aRPrBoldRe = regexp.MustCompile(` b="[01]"`)
+	aPPrRe     = regexp.MustCompile(`(?s)<a:pPr[^>]*?(?:/>|>.*?</a:pPr>)`)
+	aSolidFill = regexp.MustCompile(`(?s)<a:solidFill>.*?</a:solidFill>`)
+	aLnCloseRe = regexp.MustCompile(`(?s)<a:ln[^>]*?(?:/>|>.*?</a:ln>)`)
+)
+
+// styledRun is one run of a built paragraph: its text, whether it is bold, and
+// an optional colour. A zero Hex leaves the template's colour alone.
+type styledRun struct {
+	Text string
+	Bold bool
+	Hex  string
+}
+
+// The deck's body font ships as two separate families rather than one family
+// with a bold weight, so b="1" alone changes nothing: a run set in "Wavehaus
+// 128 Bold" prints bold however its b attribute reads, and one set in "Wavehaus
+// 66 Book" prints light. Weight is a choice of typeface here, and setting b
+// without swapping the face is why the issues tables came out uniformly heavy.
+const (
+	deckBoldFace  = "Wavehaus 128 Bold"
+	deckLightFace = "Wavehaus 66 Book"
+)
+
+var deckFaceRe = regexp.MustCompile(`typeface="(?:` +
+	regexp.QuoteMeta(deckBoldFace) + `|` + regexp.QuoteMeta(deckLightFace) + `)"`)
+
+// withRunBold returns rPr with b set explicitly and, where the run is set in
+// one of the deck's two Wavehaus faces, switched to the face for that weight.
+//
+// Explicitly, not by omission: these runs sit in table cells whose placeholder
+// was bold, and a run that says nothing about weight keeps whatever it
+// inherits. A run in any other font is left to the b attribute alone.
+func withRunBold(rPr string, bold bool) string {
+	val := ` b="0"`
+	face := deckLightFace
+	if bold {
+		val = ` b="1"`
+		face = deckBoldFace
+	}
+	if strings.TrimSpace(rPr) == "" {
+		return `<a:rPr lang="en-US"` + val + `/>`
+	}
+	open := aRPrOpenRe.FindString(rPr)
+	if open == "" {
+		return rPr
+	}
+	rest := deckFaceRe.ReplaceAllString(rPr[len(open):], `typeface="`+face+`"`)
+	open = aRPrBoldRe.ReplaceAllString(open, "")
+	const tag = "<a:rPr"
+	return open[:len(tag)] + val + open[len(tag):] + rest
+}
+
+// withPptRunColor returns rPr with the text colour set to hex.
+//
+// DrawingML orders a run's fill after <a:ln> and before everything else, so a
+// colour being added where there is none goes immediately after the line
+// properties if the run has any, and otherwise straight after the opening tag.
+func withPptRunColor(rPr, hex string) string {
+	fill := `<a:solidFill><a:srgbClr val="` + hex + `"/></a:solidFill>`
+	if strings.TrimSpace(rPr) == "" {
+		return `<a:rPr lang="en-US">` + fill + `</a:rPr>`
+	}
+	if aSolidFill.MatchString(rPr) {
+		return aSolidFill.ReplaceAllString(rPr, fill)
+	}
+	// A self-closing rPr has to be opened up before anything can go inside it.
+	open := aRPrOpenRe.FindString(rPr)
+	if strings.HasSuffix(open, "/>") {
+		return open[:len(open)-2] + ">" + fill + "</a:rPr>"
+	}
+	rest := rPr[len(open):]
+	if ln := aLnCloseRe.FindString(rest); ln != "" {
+		i := strings.Index(rest, ln) + len(ln)
+		return open + rest[:i] + fill + rest[i:]
+	}
+	return open + fill + rest
+}
+
+// buildAPara rebuilds a paragraph as the given runs, keeping the template
+// paragraph's alignment and borrowing its first run's properties.
+func buildAPara(tmpl string, runs []styledRun) string {
+	pPr := aPPrRe.FindString(tmpl)
+	base := ""
+	if r := aRunRe.FindString(tmpl); r != "" {
+		base = aRPrRe.FindString(r)
+	}
+	var b strings.Builder
+	b.WriteString("<a:p>")
+	b.WriteString(pPr)
+	for _, r := range runs {
+		rPr := withRunBold(base, r.Bold)
+		if r.Hex != "" {
+			rPr = withPptRunColor(rPr, r.Hex)
+		}
+		b.WriteString(stripHyperlink("<a:r>" + rPr + "<a:t>" + xmlEscape(r.Text) + "</a:t></a:r>"))
+	}
+	b.WriteString("</a:p>")
+	return b.String()
+}
+
+// setCellParas makes a table cell read as exactly these paragraphs, styled off
+// the paragraph the template left in it.
+func setCellParas(cell string, paras [][]styledRun) string {
+	existing := childElems(cell, "a:p")
+	if len(existing) == 0 {
+		return cell
+	}
+	tmpl := cell[existing[0].Start:existing[0].End]
+	var b strings.Builder
+	for _, runs := range paras {
+		b.WriteString(buildAPara(tmpl, runs))
+	}
+	return cell[:existing[0].Start] + b.String() + cell[existing[len(existing)-1].End:]
+}
+
+// ---------------------------------------------------------------------------
 // the slides that appear once
 // ---------------------------------------------------------------------------
 
@@ -224,12 +358,7 @@ func renderIssuesSlide(slide string, group []numberedFinding, index, total int) 
 		row := tbl[span[0]:span[1]]
 		b.WriteString(tbl[prev:span[0]])
 		if fi := ri - 1; fi < len(group) {
-			f := group[fi]
-			b.WriteString(setPlaceholders(row, map[string]string{
-				"[Issue]":          issueSummary(f),
-				"[Rating]":         severityDisplay(f.Severity),
-				"[Recommendation]": recommendationText(f),
-			}))
+			b.WriteString(setIssueRow(row, group[fi]))
 		}
 		// A row with no finding is dropped rather than left blank.
 		prev = span[1]
@@ -272,17 +401,74 @@ func uniqueInOrder(items []string) []string {
 	return out
 }
 
-// issueSummary is what the issues table shows for a finding: its title, a
-// sentence of description, and the host it was found on.
-func issueSummary(f numberedFinding) string {
-	parts := []string{strings.TrimSpace(f.Title) + ":"}
+// setIssueRow fills one row of an issues table: the finding on the left, its
+// criticality in the middle, the recommendation on the right.
+//
+// The cells are filled by position rather than by placeholder token. Each needs
+// its own weight and colour, which a token substitution cannot give it - the
+// placeholder carries one set of run properties and every value replacing it
+// came out looking the same.
+func setIssueRow(row string, f numberedFinding) string {
+	cells := childElems(row, "a:tc")
+	var b strings.Builder
+	prev := 0
+	for ci, c := range cells {
+		cell := row[c.Start:c.End]
+		var filled string
+		switch ci {
+		case 0:
+			filled = setCellParas(cell, issueParas(f))
+		case 1:
+			filled = setCellParas(cell, [][]styledRun{{{
+				Text: deckSeverityLabel(f.Severity),
+				Bold: true,
+				Hex:  severityHex(f.Severity),
+			}}})
+		case 2:
+			filled = setCellParas(cell, [][]styledRun{{{Text: recommendationText(f)}}})
+		default:
+			continue
+		}
+		b.WriteString(row[prev:c.Start])
+		b.WriteString(filled)
+		prev = c.End
+	}
+	b.WriteString(row[prev:])
+	return b.String()
+}
+
+// deckSeverityLabel names a criticality for the issues table's Severity column.
+//
+// The column is a little over an inch wide, sized for "Critical". The report
+// writes the band out in full, and "Informational" does not fit: it wrapped
+// mid-word as "Informati / onal", which reads as a broken slide. The deck
+// already has a short form for exactly this reason - both the doughnut's legend
+// and the criticality key beside the ring say "Info" - so the column uses the
+// name the rest of the deck uses. The slide title is prose with room for the
+// full word and keeps it.
+func deckSeverityLabel(sev string) string {
+	label := severityDisplay(sev)
+	if label == "Informational" {
+		return "Info"
+	}
+	return label
+}
+
+// issueParas is what the issues table shows for a finding, laid out the way the
+// source deck lays it out: the title in bold with a colon, the description
+// under it in plain text, and the host on its own line behind a bold label.
+func issueParas(f numberedFinding) [][]styledRun {
+	paras := [][]styledRun{{{Text: strings.TrimSpace(f.Title) + ":", Bold: true}}}
 	if d := firstSentence(f.Description); d != "" {
-		parts = append(parts, d)
+		paras = append(paras, []styledRun{{Text: d}})
 	}
 	if host := strings.TrimSpace(f.AffectedSystem); host != "" {
-		parts = append(parts, "Affected Host: "+host)
+		paras = append(paras, []styledRun{
+			{Text: "Affected Host: ", Bold: true},
+			{Text: host},
+		})
 	}
-	return strings.Join(parts, " ")
+	return paras
 }
 
 func recommendationText(f numberedFinding) string {
@@ -328,9 +514,18 @@ func scenarioRows(f numberedFinding) [][2]string {
 
 // renderScenarioSlide fills one scenario slide for a finding. The screenshot is
 // attached separately, by pointPictureAt.
-func renderScenarioSlide(slide string, f numberedFinding) string {
+//
+// part is which of the finding's screenshots this slide carries. A finding with
+// more than one proof runs over several slides, and the source deck marks the
+// later ones "(Cont'd)" rather than repeating the same heading verbatim - three
+// identical titles in a row read as a duplicated slide.
+func renderScenarioSlide(slide string, f numberedFinding, part int) string {
+	title := "Vulnerability Scenario – " + f.VulnID
+	if part > 1 {
+		title += " (Cont’d)"
+	}
 	slide = setPlaceholders(slide, map[string]string{
-		"Vulnerability Scenario – [Vulnerability ID]": "Vulnerability Scenario – " + f.VulnID,
+		"Vulnerability Scenario – [Vulnerability ID]": title,
 	})
 	return fillTableByPosition(slide, scenarioRows(f))
 }
@@ -386,12 +581,27 @@ func setCellParaText(cell, text string) string {
 	})
 }
 
-// pointPictureAt repoints the slide's picture frame at a new relationship id.
-func pointPictureAt(slide, relID string) string {
+// pointPictureAt repoints the slide's picture frame at a new relationship id and
+// reshapes the frame to the screenshot's own proportions.
+//
+// The template's frame is square, because the proof in the deck it came from
+// was. Screenshots are not: a wide terminal capture dropped into it without
+// rescaling is stretched to a square, which distorts exactly the text a client
+// is being asked to read. The frame is fitted inside the square the template
+// drew and centred there, so the evidence in the deck is the same picture the
+// report shows rather than a squashed copy of it.
+func pointPictureAt(slide, relID string, imgW, imgH int) string {
 	if relID == "" {
 		return slide
 	}
-	return blipRe.ReplaceAllString(slide, `<a:blip r:embed="`+relID+`"`)
+	slide = blipRe.ReplaceAllString(slide, `<a:blip r:embed="`+relID+`"`)
+	frame := pPicRe.FindStringIndex(slide)
+	if frame == nil {
+		return slide
+	}
+	return slide[:frame[0]] +
+		fitLogoFrame(slide[frame[0]:frame[1]], relID, imgW, imgH) +
+		slide[frame[1]:]
 }
 
 // clonedRelsWithImage copies a slide's relationships and adds one for the
@@ -436,14 +646,16 @@ func parseInt(s string) (int, error) {
 // same finding. They are decoded first only to reject anything that is not
 // actually an image - PowerPoint reports the whole file as corrupt rather than
 // skipping a picture it cannot read.
-func (d *closureDeck) addMedia(img POCImage) (string, error) {
+func (d *closureDeck) addMedia(img POCImage) (string, image.Config, error) {
 	if len(img.Data) == 0 {
-		return "", fmt.Errorf("the evidence record holds no data")
+		return "", image.Config{}, fmt.Errorf("the evidence record holds no data")
 	}
-	if _, format, err := image.DecodeConfig(bytes.NewReader(img.Data)); err != nil {
-		return "", fmt.Errorf("not a readable image: %w", err)
-	} else if format == "" {
-		return "", fmt.Errorf("unrecognised image format")
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(img.Data))
+	if err != nil {
+		return "", image.Config{}, fmt.Errorf("not a readable image: %w", err)
+	}
+	if format == "" {
+		return "", image.Config{}, fmt.Errorf("unrecognised image format")
 	}
 
 	ext := strings.ToLower(pngExtRe.FindString(img.Filename))
@@ -454,7 +666,7 @@ func (d *closureDeck) addMedia(img POCImage) (string, error) {
 	d.nextMediaNum++
 	d.add("ppt/media/"+name, img.Data)
 	d.declareImageType(ext)
-	return name, nil
+	return name, cfg, nil
 }
 
 // declareImageType makes sure the package advertises the extension. PNG and
@@ -559,8 +771,83 @@ func (d *closureDeck) addCustomerLogo(payload string) string {
 	body := string(slide.Data)
 	pic := fitLogoFrame(body[frame[0]:frame[1]], relID, b.Dx(), b.Dy())
 	slide.Data = []byte(body[:frame[0]] + pic + body[frame[1]:])
+
+	// The same logo goes in the middle of the executive summary's ring. It is
+	// put on the summary template before that slide is cloned, so every
+	// headline slide the engagement needs carries it without the picture being
+	// added, and relationship-numbered, once per clone.
+	d.logoInSummaryRing(name, b.Dx(), b.Dy())
 	return ""
 }
+
+// logoInSummaryRing adds a relationship for the already-embedded logo to the
+// summary template's own relationship part and drops the picture into the
+// ring's empty centre.
+func (d *closureDeck) logoInSummaryRing(mediaName string, imgW, imgH int) {
+	slide := d.part(summaryTemplatePart)
+	rels := d.part(relsNameFor(summaryTemplatePart))
+	if slide == nil || rels == nil {
+		return
+	}
+	relID := fmt.Sprintf("rId%d", nextFreeRelNumber(string(rels.Data)))
+	rels.Data = []byte(strings.Replace(string(rels.Data), "</Relationships>",
+		fmt.Sprintf(`<Relationship Id="%s" Type="%s" Target="../media/%s"/>`, relID, imageRelTy, mediaName)+
+			"</Relationships>", 1))
+	slide.Data = []byte(placeLogoInRing(string(slide.Data), relID, imgW, imgH))
+}
+
+// The executive summary's ring is drawn with a hole in the middle, and the
+// source deck leaves it empty. These are that hole, measured off the rendered
+// slide: centre and diameter in EMU, on a 13.333 x 7.5 inch slide.
+const (
+	ringHoleCX       = 6053088
+	ringHoleCY       = 3348038
+	ringHoleDiameter = 1466850
+
+	// How much of the hole the logo is allowed to take, as a percentage. A mark
+	// set edge to edge in a circle reads as clipped even when it is not, and a
+	// client's logo is the last thing to crowd.
+	ringLogoFillPct = 68
+)
+
+// placeLogoInRing drops the client's logo into the empty middle of the summary
+// slide's ring, scaled to its own proportions and centred in the hole.
+//
+// The picture is appended to the slide's shape tree rather than filling a frame
+// the template drew, because the template draws none there - the ring's centre
+// is a gap in artwork, not a placeholder.
+func placeLogoInRing(slide, relID string, imgW, imgH int) string {
+	if relID == "" || imgW <= 0 || imgH <= 0 {
+		return slide
+	}
+	end := strings.LastIndex(slide, "</p:spTree>")
+	if end < 0 {
+		return slide
+	}
+
+	boxed := ringHoleDiameter * ringLogoFillPct / 100
+	scale := float64(boxed) / float64(imgW)
+	if s := float64(boxed) / float64(imgH); s < scale {
+		scale = s
+	}
+	w := int(float64(imgW) * scale)
+	h := int(float64(imgH) * scale)
+
+	pic := fmt.Sprintf(`<p:pic><p:nvPicPr>`+
+		`<p:cNvPr id="%d" name="Customer Logo"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>`+
+		`<p:nvPr/></p:nvPicPr>`+
+		`<p:blipFill><a:blip r:embed="%s"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>`+
+		`<p:spPr><a:xfrm><a:off x="%d" y="%d"/><a:ext cx="%d" cy="%d"/></a:xfrm>`+
+		`<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`,
+		ringLogoShapeID, relID,
+		ringHoleCX-w/2, ringHoleCY-h/2, w, h)
+
+	return slide[:end] + pic + slide[end:]
+}
+
+// ringLogoShapeID is above anything the template numbers, so the id stays
+// unique however many shapes the slide already carries.
+const ringLogoShapeID = 9001
 
 // fitLogoFrame points a picture frame at relID and reshapes it to the image's
 // own aspect ratio, centred inside the box the template drew.

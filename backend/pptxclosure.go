@@ -99,7 +99,7 @@ func buildClosureDeck(config ReportConfig) ([]byte, *reportNotes, error) {
 	// The executive summary: one panel per assessment area, on the scope slide
 	// and again over the headline findings, plus the two charts beside them.
 	panels := buildAreaPanels(config, findings)
-	deck.fillScopeSlide(config, panels)
+	deck.fillScopeSlide(config, panels, len(findings))
 	deck.fillCharts(config, findings)
 
 	var summarySlides []string
@@ -126,8 +126,9 @@ func buildClosureDeck(config ReportConfig) ([]byte, *reportNotes, error) {
 			notes.FindingsWithoutProof = append(notes.FindingsWithoutProof, strings.TrimSpace(f.Title))
 			continue
 		}
+		part := 0
 		for _, img := range f.POCImages {
-			mediaName, err := deck.addMedia(img)
+			mediaName, cfg, err := deck.addMedia(img)
 			if err != nil {
 				// A single unreadable screenshot must not lose the whole deck.
 				notes.FindingsWithoutProof = append(notes.FindingsWithoutProof,
@@ -135,9 +136,10 @@ func buildClosureDeck(config ReportConfig) ([]byte, *reportNotes, error) {
 						strings.TrimSpace(f.Title), img.Filename, err))
 				continue
 			}
-			body := renderScenarioSlide(string(scenarioTmpl.Data), f)
+			part++
+			body := renderScenarioSlide(string(scenarioTmpl.Data), f, part)
 			rels, relID := clonedRelsWithImage(string(scenarioRels.Data), mediaName)
-			body = pointPictureAt(body, relID)
+			body = pointPictureAt(body, relID, cfg.Width, cfg.Height)
 			scenarioSlides = append(scenarioSlides, deck.addSlideRaw(body, rels))
 			shots++
 		}

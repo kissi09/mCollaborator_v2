@@ -56,21 +56,23 @@ var reportAreas = []areaDef{
 // gives it - which for both the vulnerability register and a finding's Rating
 // row is none - so the criticality reads as a coloured word on the page rather
 // than a solid block of colour with white text knocked out of it.
+//
+// The values are the exact fills the criticality-criteria table in the template
+// uses for each band (docs/colors.PNG), so a severity reads as the same colour
+// wherever it appears in the report. They are sampled from that legend, not
+// picked for contrast on white - do not "improve" one of them in isolation.
 func severityHex(sev string) string {
 	switch strings.ToLower(strings.TrimSpace(sev)) {
 	case "critical":
-		return "C00000"
+		return "FF0000"
 	case "high":
-		return "FF7900"
+		return "F68831"
 	case "medium":
-		// Darker than the FFC000 the criticality-criteria table fills its cell
-		// with: that amber is legible as a background behind black text, but
-		// as text on white it all but disappears.
-		return "BF8F00"
+		return "FFC000"
 	case "low":
-		return "28A745"
+		return "92D050"
 	default:
-		return "2F6FED"
+		return "00B0F0"
 	}
 }
 
@@ -785,6 +787,16 @@ func fillDetailTable(tbl string, values map[string]string, pocXML string) string
 			cell = setSeverityBadge(cell, value, severityHex(value))
 		case "poc":
 			cell = setPOCCell(cell, value, pocXML)
+		case "recommendation":
+			if value == "" {
+				continue
+			}
+			// The recommendation cell holds two paragraphs: the
+			// "<VulnID> - <Header>" naming line, which stays bold, and the
+			// body elaborating on it, which does not. Bold has to be turned
+			// off explicitly - the cell's <w:cnfStyle> bolds any run that
+			// does not say otherwise.
+			cell, _ = setFirstEmptyParaTextUnbolded(cell, value)
 		default:
 			if value == "" {
 				continue

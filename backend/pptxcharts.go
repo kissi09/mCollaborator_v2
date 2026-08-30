@@ -49,7 +49,8 @@ func (d *closureDeck) fillCharts(config ReportConfig, findings []numberedFinding
 	if len(cats) > 0 {
 		if p := d.part(areaChartPart); p != nil {
 			chart := setPptChartData(string(p.Data), cats, vals)
-			p.Data = []byte(fitCategoryAxis(chart, len(cats)))
+			chart = fitCategoryAxis(chart, len(cats))
+			p.Data = []byte(fitBarGap(chart, len(cats)))
 		}
 	}
 
@@ -107,7 +108,36 @@ func setPptChartData(chart string, cats []string, vals []int) string {
 			`</c:numCache></c:numRef></c:val>`,
 		n+1, n, numPts.String()))
 
-	return dropDataPointsBeyond(chart, n)
+	return hideZeroDataLabels(dropDataPointsBeyond(chart, n), vals)
+}
+
+// hideZeroDataLabels deletes the value label on any point worth nothing.
+//
+// A segment with no findings draws nothing, but its label is still placed at
+// the angle the segment would have occupied - so an engagement with no Low
+// findings printed a bare "0" sitting on the boundary between the two segments
+// either side of it, reading as a count belonging to one of them.
+//
+// The per-point deletions go at the front of the series' own <c:dLbls>: the
+// schema orders <c:dLbl> entries before the settings that follow, and a chart
+// whose children are out of order is one PowerPoint offers to repair.
+func hideZeroDataLabels(chart string, vals []int) string {
+	var b strings.Builder
+	for i, v := range vals {
+		if v == 0 {
+			fmt.Fprintf(&b, `<c:dLbl><c:idx val="%d"/><c:delete val="1"/></c:dLbl>`, i)
+		}
+	}
+	if b.Len() == 0 {
+		return chart
+	}
+	const open = "<c:dLbls>"
+	i := strings.Index(chart, open)
+	if i < 0 {
+		return chart
+	}
+	i += len(open)
+	return chart[:i] + b.String() + chart[i:]
 }
 
 // dropDataPointsBeyond removes per-point formatting for points the series no
@@ -164,6 +194,39 @@ func fitCategoryAxis(chart string, categories int) string {
 		sz = 900
 	}
 	return axisTextRe.ReplaceAllString(chart, fmt.Sprintf(`${1}sz="%d"`, sz))
+}
+
+var gapWidthRe = regexp.MustCompile(`<c:gapWidth val="\d+"/>`)
+
+// templateBarGap and templateBarCount are the gap the template sets and the
+// number of bars it was set for. A bar chart divides its width evenly between
+// its categories and then leaves gapWidth percent of a bar's width as space, so
+// the same gap with fewer bars makes each one wider.
+const (
+	templateBarGap   = 37
+	templateBarCount = 4
+	maxBarGap        = 500
+)
+
+// fitBarGap keeps a bar the width it is in the template however many areas the
+// engagement covers.
+//
+// The template's gap is tuned for four bars. An engagement scoped to one area
+// drew that single bar across the entire plot - a block of colour four inches
+// wide labelled "4", which reads as a chart that failed to render rather than
+// as one finding count. The gap is widened to hold the bar at the width four of
+// them would have had.
+func fitBarGap(chart string, categories int) string {
+	if categories <= 0 || categories >= templateBarCount {
+		return chart
+	}
+	// bar = plot / (categories * (1 + gap/100)), solved for the template's own
+	// bar width at templateBarCount categories.
+	gap := (100+templateBarGap)*templateBarCount/categories - 100
+	if gap > maxBarGap {
+		gap = maxBarGap
+	}
+	return gapWidthRe.ReplaceAllString(chart, fmt.Sprintf(`<c:gapWidth val="%d"/>`, gap))
 }
 
 // fitCategoryLabels names the bars so they fit the frame the template gives

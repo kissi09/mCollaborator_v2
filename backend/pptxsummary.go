@@ -116,13 +116,13 @@ func chunkPanels(panels []areaPanel, size int) [][]areaPanel {
 
 // fillScopeSlide rewrites the scope table, one area per cell, and the bullets
 // beneath it.
-func (d *closureDeck) fillScopeSlide(config ReportConfig, panels []areaPanel) {
+func (d *closureDeck) fillScopeSlide(config ReportConfig, panels []areaPanel, findings int) {
 	p := d.part(scopeSlidePart)
 	if p == nil {
 		return
 	}
 	slide := setScopeTable(string(p.Data), panels)
-	p.Data = []byte(setScopeBullets(slide, config))
+	p.Data = []byte(setScopeBullets(slide, config, findings))
 }
 
 var (
@@ -161,7 +161,69 @@ func setScopeTable(slide string, panels []areaPanel) string {
 		filled := setCellParagraphs(tbl[cells[i].Start:cells[i].End], panel.Heading, panel.ScopeText)
 		tbl = tbl[:cells[i].Start] + filled + tbl[cells[i].End:]
 	}
+	tbl = collapseScopeTable(tbl)
 	return slide[:tblStart] + tbl + slide[tblEnd:]
+}
+
+// collapseScopeTable takes the empty space out of the table once it is filled.
+//
+// The template draws two columns and four rows because the engagement it came
+// from tested five areas. An engagement that tested one leaves seven cells
+// blank, and the table still reserves their height and width - which is the
+// band of empty pink the slide was showing under a single scope entry.
+//
+// Body rows with nothing in any cell are dropped, and a row whose right-hand
+// cell is empty has its left-hand cell widened across both columns, the way the
+// template's own last row spans the width for a single wide area.
+func collapseScopeTable(tbl string) string {
+	rows := childElems(tbl, "a:tr")
+	// Back to front again: dropping or rewriting a row must not move the ones
+	// still to be looked at.
+	for ri := len(rows) - 1; ri >= 1; ri-- {
+		row := tbl[rows[ri].Start:rows[ri].End]
+		cells := childElems(row, "a:tc")
+
+		filled := 0
+		var last int
+		for ci, c := range cells {
+			open := aTcOpenRe.FindString(row[c.Start:c.End])
+			if strings.Contains(open, "Merge=") {
+				continue
+			}
+			if strings.TrimSpace(aParaText(row[c.Start:c.End])) != "" {
+				filled++
+				last = ci
+			}
+		}
+
+		switch {
+		case filled == 0:
+			tbl = tbl[:rows[ri].Start] + tbl[rows[ri].End:]
+		case filled == 1 && last == 0 && len(cells) == 2:
+			tbl = tbl[:rows[ri].Start] + spanRowAcross(row) + tbl[rows[ri].End:]
+		}
+	}
+	return tbl
+}
+
+var aTcMergeRe = regexp.MustCompile(`(hMerge|gridSpan)="[^"]*"`)
+
+// spanRowAcross widens a two-cell row's first cell over both columns, leaving
+// the second as the hidden half of the merge PowerPoint expects to find there.
+func spanRowAcross(row string) string {
+	cells := childElems(row, "a:tc")
+	if len(cells) != 2 {
+		return row
+	}
+	first := row[cells[0].Start:cells[0].End]
+	second := row[cells[1].Start:cells[1].End]
+	first = aTcOpenRe.ReplaceAllString(first, `<a:tc gridSpan="2">`)
+	second = aTcOpenRe.ReplaceAllString(second, `<a:tc hMerge="1">`)
+	// Whatever the hidden half held is never drawn, but PowerPoint still parses
+	// it; leaving the template's placeholder text there is asking for it to
+	// reappear if the merge is ever undone.
+	second = setCellParagraphs(second, "", nil)
+	return row[:cells[0].Start] + first + row[cells[0].End:cells[1].Start] + second + row[cells[1].End:]
 }
 
 // panelCells lists the table's fillable cells: everything below the "Scope"
@@ -212,7 +274,12 @@ func setCellParagraphs(cell, heading string, lines []string) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(setAParaText(headTmpl, heading))
+	// A continuation panel carries no heading of its own: it is the rest of the
+	// list started in the panel before it. Writing an empty heading paragraph
+	// would push its findings down a line and break the alignment with them.
+	if heading != "" || len(lines) == 0 {
+		b.WriteString(setAParaText(headTmpl, heading))
+	}
 	for _, line := range lines {
 		b.WriteString(setAParaText(bodyTmpl, line))
 	}
@@ -226,8 +293,16 @@ func setCellParagraphs(cell, heading string, lines []string) string {
 // the engagement's exclusions, labelled as exclusions: an unlabelled bullet on a
 // slide headed "Scope" reads as something that *was* tested, which is the
 // opposite of what an out-of-scope line means.
-func setScopeBullets(slide string, config ReportConfig) string {
+func setScopeBullets(slide string, config ReportConfig, findings int) string {
 	var lines []string
+	if period := assessmentPeriod(config); period != "" {
+		lines = append(lines, "The project was executed during the period "+period)
+	}
+	if findings > 0 {
+		lines = append(lines, fmt.Sprintf(
+			"A total of %d %s have been discovered, analyzed, categorized and reported upon.",
+			findings, plural(findings, "vulnerability", "vulnerabilities")))
+	}
 	for _, s := range config.OutOfScope {
 		if s = strings.TrimSpace(s); s != "" {
 			lines = append(lines, "Out of scope - "+s)
@@ -236,13 +311,76 @@ func setScopeBullets(slide string, config ReportConfig) string {
 	return replaceShapeParagraphs(slide, "[Scope]", lines)
 }
 
+// assessmentPeriod reads the dates the way the source deck's bullet reads them,
+// and says nothing at all rather than half a sentence when a date is missing.
+func assessmentPeriod(config ReportConfig) string {
+	start := strings.TrimSpace(config.AssessmentStart)
+	end := strings.TrimSpace(config.AssessmentEnd)
+	switch {
+	case start != "" && end != "":
+		return "from " + start + " to " + end
+	case start != "":
+		return "from " + start
+	case end != "":
+		return "ending " + end
+	}
+	return ""
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 // ---------------------------------------------------------------------------
 // slide 3 - headline findings
 // ---------------------------------------------------------------------------
 
+// spreadPanels fills the panel slots a slide would otherwise leave empty by
+// splitting an area's findings across them.
+//
+// The ring has four panels around it, one per area. An engagement scoped to a
+// single area filled one of them and left three blank, so every finding piled
+// into one corner and the ring sat against three-quarters of nothing. Rather
+// than leave the slots empty, an area with more findings than one panel shows
+// is continued into the next slot, heading printed once so the continuation
+// reads as more of the same list and not as a second area.
+//
+// Nothing changes when the engagement fills the slots on its own: with four or
+// more areas there is no spare slot to spread into.
+func spreadPanels(panels []areaPanel, slots int) []areaPanel {
+	out := append([]areaPanel(nil), panels...)
+	for len(out) < slots {
+		// The panel with the most findings still unshown is the one worth
+		// continuing; when none has any, the slide is as full as it gets.
+		best := -1
+		for i := range out {
+			if len(out[i].Headlines) <= headlinesPerPanel {
+				continue
+			}
+			if best < 0 || len(out[i].Headlines) > len(out[best].Headlines) {
+				best = i
+			}
+		}
+		if best < 0 {
+			break
+		}
+		rest := out[best].Headlines[headlinesPerPanel:]
+		out[best].Headlines = out[best].Headlines[:headlinesPerPanel]
+		cont := areaPanel{Headlines: rest}
+		out = append(out, areaPanel{})
+		copy(out[best+2:], out[best+1:])
+		out[best+1] = cont
+	}
+	return out
+}
+
 // renderSummarySlide fills one headline slide with up to four areas.
 func renderSummarySlide(slide string, panels []areaPanel) string {
 	shapes := findingShapes(slide)
+	panels = spreadPanels(panels, len(shapes))
 
 	// Rewrite from the last shape in the file backwards, so each edit only
 	// moves text the loop has already passed. Which panel a shape gets comes
@@ -266,6 +404,12 @@ func renderSummarySlide(slide string, panels []areaPanel) string {
 
 var aOffRe = regexp.MustCompile(`<a:off x="(-?\d+)" y="(-?\d+)"/>`)
 
+// panelColumnEMU is how far apart two panels have to start horizontally before
+// they count as being in different columns: two inches. The template's three
+// right-hand panels are within an inch of each other and six inches from the
+// one on the left, so anything between those two distances separates them.
+const panelColumnEMU = 1828800
+
 // panelShape is one of slide 3's text boxes: where it sits in the file, and
 // where it comes in the order a reader meets them.
 type panelShape struct {
@@ -274,10 +418,17 @@ type panelShape struct {
 }
 
 // findingShapes locates slide 3's panels - the text boxes carrying a [Finding]
-// placeholder - in file order, each tagged with its reading position: down the
-// slide, then across. The template scatters them around the artwork, so the
-// order they appear in the file is not the order they are read in, and filling
-// them in file order would put the first area halfway down the slide.
+// placeholder - in file order, each tagged with its reading position: by column
+// across the slide, then down each column. The template scatters them around
+// the artwork, so the order they appear in the file is not the order they are
+// read in, and filling them in file order would put the first area halfway down
+// the slide.
+//
+// Column before row, because the panels are not a grid: the template puts one
+// beside the ring on the left and stacks three down its right. Sorting on y
+// first interleaves the two sides, which put the second area above the first
+// and, with a single area spread over two panels, printed the continuation of a
+// list above the heading it continued.
 func findingShapes(slide string) []panelShape {
 	type placed struct {
 		at   span
@@ -297,16 +448,37 @@ func findingShapes(slide string) []panelShape {
 		found = append(found, p)
 	}
 
+	// Group the panels into columns by how far apart they start, rather than by
+	// a fixed grid: the template's right-hand panels are not aligned to the
+	// pixel, and a fixed bucket boundary falling between two of them would read
+	// as two columns and shuffle their order.
+	byX := make([]int, len(found))
+	for i := range byX {
+		byX[i] = i
+	}
+	sort.SliceStable(byX, func(a, b int) bool { return found[byX[a]].x < found[byX[b]].x })
+	column := make([]int, len(found))
+	col, start := 0, 0
+	for n, idx := range byX {
+		if n == 0 {
+			start = found[idx].x
+		} else if found[idx].x-start > panelColumnEMU {
+			col++
+			start = found[idx].x
+		}
+		column[idx] = col
+	}
+
 	byReading := make([]int, len(found))
 	for i := range byReading {
 		byReading[i] = i
 	}
 	sort.SliceStable(byReading, func(a, b int) bool {
-		i, j := found[byReading[a]], found[byReading[b]]
-		if i.y != j.y {
-			return i.y < j.y
+		i, j := byReading[a], byReading[b]
+		if column[i] != column[j] {
+			return column[i] < column[j]
 		}
-		return i.x < j.x
+		return found[i].y < found[j].y
 	})
 
 	out := make([]panelShape, len(found))

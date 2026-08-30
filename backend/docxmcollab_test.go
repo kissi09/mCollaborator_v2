@@ -586,32 +586,96 @@ func tinyPNGDataURI() string {
 		"iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAIAAADwyuo0AAAAFUlEQVR4nGL5X8kAB0wMSAAQAAD//yTbAX8dRNStAAAAAElFTkSuQmCC"
 }
 
+// templateDocumentXML returns the untouched template's document.xml, for
+// assertions that need a baseline of what the template already contains.
+func templateDocumentXML(t *testing.T) string {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(mcollabTemplateDocx), int64(len(mcollabTemplateDocx)))
+	if err != nil {
+		t.Fatalf("template is not a valid zip: %v", err)
+	}
+	for _, f := range zr.File {
+		if strings.ReplaceAll(f.Name, "\\", "/") != "word/document.xml" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open template document.xml: %v", err)
+		}
+		defer rc.Close()
+		b, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read template document.xml: %v", err)
+		}
+		return string(b)
+	}
+	t.Fatal("template has no word/document.xml")
+	return ""
+}
+
 // TestCriticalityIsColouredTextNotAFilledCell pins the register and the Rating
-// row to colouring the word itself. The template gives neither cell a fill, so
-// a fill appearing on one can only have come from the renderer.
+// row to colouring the word itself, in the exact colours the template's
+// criticality-criteria legend fills its bands with (docs/colors.PNG).
+//
+// Those same hexes therefore appear as fills in the legend table the template
+// ships, so a fill can only be blamed on the renderer if there are *more* of
+// them in the output than the template already had.
 func TestCriticalityIsColouredTextNotAFilledCell(t *testing.T) {
 	parts := readDocxParts(t, sampleConfig())
 	doc := parts["word/document.xml"]
+	tmpl := templateDocumentXML(t)
 
 	for _, sev := range []struct{ label, hex string }{
-		{"Critical", "C00000"},
-		{"High", "FF7900"},
-		{"Medium", "BF8F00"},
-		{"Low", "28A745"},
+		{"Critical", "FF0000"},
+		{"High", "F68831"},
+		{"Medium", "FFC000"},
+		{"Low", "92D050"},
 	} {
 		want := `<w:color w:val="` + sev.hex + `"/>`
 		if !strings.Contains(doc, want) {
 			t.Errorf("no %s text is set in %s", sev.label, sev.hex)
 		}
-		if strings.Contains(doc, `w:fill="`+sev.hex+`"`) {
-			t.Errorf("a cell is still filled %s; only the %s text should carry the colour",
-				sev.hex, sev.label)
+		fill := `w:fill="` + sev.hex + `"`
+		if got, base := strings.Count(doc, fill), strings.Count(tmpl, fill); got > base {
+			t.Errorf("%d cells are filled %s against the template's %d; only the %s text should carry the colour",
+				got, sev.hex, base, sev.label)
 		}
 	}
 	// White-on-colour was the old badge treatment and has no place now that the
 	// cell behind the word is the page.
 	if strings.Contains(doc, `<w:b/><w:color w:val="FFFFFF"/>`) {
 		t.Error("a criticality word is still being knocked out in white")
+	}
+}
+
+// TestRecommendationBodyIsNotBold pins the elaboration under a finding's
+// "<VulnID> - <Header>" line to plain text. The naming line stays bold; the
+// paragraph explaining it does not. Bold has to be switched off explicitly -
+// the cell's <w:cnfStyle> bolds any run that stays silent about it.
+func TestRecommendationBodyIsNotBold(t *testing.T) {
+	config := sampleConfig()
+	config.Findings[0].Recommendation = "Parameterise every query and validate input."
+	parts := readDocxParts(t, config)
+	doc := parts["word/document.xml"]
+
+	body := xmlEscape(config.Findings[0].Recommendation)
+	i := strings.Index(doc, body)
+	if i < 0 {
+		t.Fatalf("recommendation body %q is not in the document", body)
+	}
+	run := doc[strings.LastIndex(doc[:i], "<w:r>"):i]
+	if !strings.Contains(run, `<w:b w:val="0"/>`) {
+		t.Errorf("recommendation body run does not switch bold off: %s", run)
+	}
+	if strings.Contains(run, `<w:b/>`) {
+		t.Errorf("recommendation body run is still bold: %s", run)
+	}
+
+	// The naming line above it is still bold - it is the template's own run,
+	// untouched.
+	head := config.Findings[0].Title
+	if !strings.Contains(doc, xmlEscape(head)) {
+		t.Errorf("finding title %q is missing", head)
 	}
 }
 

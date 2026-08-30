@@ -482,6 +482,68 @@ func withRunColor(rPr, hex string) string {
 	return rPr
 }
 
+// runBoldRe and runBoldCsRe match the two bold toggles a run can carry, in
+// either their bare or explicit-value form.
+var (
+	runBoldRe   = regexp.MustCompile(`<w:b(?: w:val="[^"]*")?/>`)
+	runBoldCsRe = regexp.MustCompile(`<w:bCs(?: w:val="[^"]*")?/>`)
+)
+
+// rPrBoldPredecessors are the CT_RPr children the schema orders *before*
+// <w:b>. Bold is inserted after the last of these the run already carries, so
+// the properties stay in schema order and Word does not offer to repair the
+// file. Everything else in CT_RPr sorts after <w:bCs>.
+var rPrBoldPredecessors = []string{"<w:rStyle", "<w:rFonts"}
+
+// withRunBoldOff returns rPr with bold explicitly switched off, replacing any
+// bold toggle already there. It has to be explicit rather than merely absent:
+// these runs sit in table cells whose <w:cnfStyle> makes the table style's
+// conditional formatting bold them, so a run with no <w:b> at all still prints
+// bold.
+func withRunBoldOff(rPr string) string {
+	off := `<w:b w:val="0"/><w:bCs w:val="0"/>`
+	if strings.TrimSpace(rPr) == "" {
+		return `<w:rPr>` + off + `</w:rPr>`
+	}
+	stripped := runBoldCsRe.ReplaceAllString(runBoldRe.ReplaceAllString(rPr, ""), "")
+	// Insert after the last predecessor present, else immediately after <w:rPr>.
+	at := strings.Index(stripped, ">") + 1
+	for _, tag := range rPrBoldPredecessors {
+		i := strings.Index(stripped, tag)
+		if i < 0 {
+			continue
+		}
+		if end := strings.Index(stripped[i:], "/>"); end >= 0 && i+end+2 > at {
+			at = i + end + 2
+		}
+	}
+	return stripped[:at] + off + stripped[at:]
+}
+
+// setParaTextUnbolded rebuilds a paragraph so it reads exactly text, not bold,
+// keeping every other run property the template gave it.
+func setParaTextUnbolded(para, text string) string {
+	gt := strings.Index(para, ">")
+	if gt < 0 {
+		return para
+	}
+	return para[:gt+1] + paraPPr(para) +
+		runsForText(withRunBoldOff(paraFirstRPr(para)), text) + `</w:p>`
+}
+
+// setFirstEmptyParaTextUnbolded is setFirstEmptyParaText with bold switched off
+// on the run it writes.
+func setFirstEmptyParaTextUnbolded(frag, text string) (string, bool) {
+	for _, p := range childElems(frag, "w:p") {
+		para := frag[p.Start:p.End]
+		if strings.TrimSpace(elemText(para)) != "" {
+			continue
+		}
+		return frag[:p.Start] + setParaTextUnbolded(para, text) + frag[p.End:], true
+	}
+	return frag, false
+}
+
 // setParaTextColored rebuilds a paragraph so it reads exactly text, in the
 // given colour, keeping every other run property the template gave it.
 func setParaTextColored(para, text, hex string) string {
