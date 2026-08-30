@@ -1,2 +1,7 @@
 desktop/dist/*.exe filter=lfs diff=lfs merge=lfs -text
 backend/*.exe filter=lfs diff=lfs merge=lfs -text
+# core.autocrlf is true on the Windows machine this is developed on, so a
+# checkout there would give the build scripts CRLF endings. A shell script
+# with them fails on Linux and macOS as `bad interpreter: /usr/bin/env bash^M`,
+# and these two are only ever run on Linux and macOS.
+*.sh text eol=lf
