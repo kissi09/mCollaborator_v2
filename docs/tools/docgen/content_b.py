@@ -80,6 +80,21 @@ PART_B = [
     "checklist in the DOCX needs no code change.",
 ]),
 
+("h3", "How a finding is printed"),
+("p", "Two details of a finding's block are set explicitly rather than inherited, because "
+      "in both cases what the template gives a run is not what the finished page should "
+      "show."),
+("bullets", [
+    "**The criticality is coloured, not filled** - see Severity colours in the Data Model "
+    "section for the five values. They apply in both places a rating appears: the "
+    "Vulnerability Register's Criticality column and each finding's Rating row.",
+    "**The recommendation body is not bold.** A finding's Recommendation cell holds two "
+    "paragraphs: the `<VulnID> - <Header>` naming line, which is bold, and the paragraph "
+    "elaborating on it, which is not. Bold has to be switched off explicitly - the cell "
+    "carries a `<w:cnfStyle>`, so the table style bolds any run that stays silent about "
+    "its weight, and a run that simply omits `<w:b/>` still prints heavy.",
+]),
+
 ("h3", "Charts"),
 ("p", "The template carries two charts, and both would otherwise print the numbers of "
       "whatever engagement the template was made from. They are rewritten from this "
@@ -194,18 +209,82 @@ PART_B = [
         ["Placeholders filled in sequence",
          "Real data printed under headings for areas that were never tested",
          "One panel per selected area; unfilled panels blanked"],
+        ["Weight is a typeface, not an attribute",
+         "Whole issues tables printed as a block of bold, and `b=\"0\"` changed nothing",
+         "The deck's body font ships as two families - Wavehaus 128 Bold and Wavehaus 66 "
+         "Book - so the run's `<a:latin>` is swapped along with `b`"],
+        ["A zero-valued doughnut segment keeps its label",
+         "A bare \"0\" printed between the two slices either side of the gap, reading as "
+         "one of theirs",
+         "Points worth nothing get `<c:dLbl><c:delete val=\"1\"/>`"],
+        ["`gapWidth` is a percentage of a bar, not of the plot",
+         "One assessment area drew a single bar across the whole chart",
+         "The gap is widened as the category count falls, holding the bar at the width "
+         "four of them would have had"],
+        ["The scenario picture frame is square",
+         "A wide screenshot was stretched to a square, distorting the text a client is "
+         "being asked to read",
+         "The frame is refitted to each image's own proportions and centred"],
     ]), [1.7, 2.4, 2.4]),
+
+("h3", "The executive summary"),
+("p", "Both summary slides are laid out for the engagement rather than filled in place, "
+      "because the template's own furniture was built for an engagement that tested five "
+      "areas and most do not."),
+("table", (
+    ["Element", "Behaviour"],
+    [
+        ["Scope table",
+         "Body rows nothing fills are dropped and a single area spans both columns, "
+         "instead of reserving the template's four rows however few areas were tested"],
+        ["The bullets beneath it",
+         "The assessment period and the finding total. They were `[Scope]` placeholder "
+         "tokens being blanked, which left the bottom half of the slide empty"],
+        ["The ring's four panels",
+         "One per area. When the engagement fills fewer than four, an area's findings are "
+         "continued into the spare slots - heading printed once - rather than piling into "
+         "one corner of a ring drawn to be surrounded"],
+        ["Panel order",
+         "By column and then down each column. Sorting on height alone interleaves the "
+         "panel left of the ring with the three stacked down its right, which put the "
+         "second area above the first"],
+        ["The ring's centre",
+         "The customer's logo, scaled to its own proportions inside the hole. It is added "
+         "to the summary template before that slide is cloned, so one relationship serves "
+         "every headline slide"],
+    ]), [1.7, 4.8]),
+
+("h3", "The issues tables"),
+("p", "A row is not one piece of text. Replacing the cell's placeholder with one joined "
+      "string inherited that placeholder's weight and printed the lot bold; the cells are "
+      "built run by run instead, matching the deck the template came from:"),
+("table", (
+    ["Column", "Content"],
+    [
+        ["Issues",
+         "The finding's title in bold with a colon, its description plain on the next "
+         "line, then the host behind a bold **Affected Host:** label"],
+        ["Severity",
+         "The criticality, bold and centred, in the same colour the report prints it - "
+         "both read `severityHex`. Informational is shortened to **Info**, which is what "
+         "the doughnut legend and the criticality key already call it and what the "
+         "column's width allows"],
+        ["Recommendation", "The recommendation header, plain"],
+    ]), [1.4, 5.1]),
 
 ("h3", "What ends up in the deck"),
 ("bullets", [
     "**Every finding** appears in the issues tables, grouped by area and most severe "
     "first.",
     "**A finding gets a scenario slide only where a screenshot is attached to it**, and a "
-    "finding with two screenshots gets two slides under the same heading. Findings without "
-    "proof are named back to the user - a closing meeting walks through the scenario "
-    "slides, and a finding without one is a finding nobody will see demonstrated.",
+    "finding with several screenshots runs over several slides, the later ones marked "
+    "**(Cont'd)** rather than repeating one heading verbatim. Findings without proof are "
+    "named back to the user - a closing meeting walks through the scenario slides, and a "
+    "finding without one is a finding nobody will see demonstrated.",
     "**Pass and Issues are coloured as text**, green `28A745` and red `C00000`, with no "
-    "cell fill.",
+    "cell fill. That pair is deliberately not the criticality palette: it is a two-state "
+    "verdict on a test, not a severity band, and nothing invites the reader to compare "
+    "the two.",
     "**One unreadable screenshot never costs the deck.** It is reported alongside the "
     "findings without proof, and the rest of the deck is still produced.",
 ]),
@@ -287,32 +366,104 @@ PART_B = [
       "tested in the installed executable, not only in a browser."),
 
 ("h3", "Building it"),
-("code", """
-# from desktop/
-.\\build.ps1                 # server + icon + app + installer
-.\\build.ps1 -SkipServer     # reuse the staged server binary
-.\\build.ps1 -NoInstaller    # skip NSIS
-"""),
+("p", "One script per platform, each doing the same three steps in the same order - build "
+      "the backend and stage it beside the shell, regenerate the icon, build the app and "
+      "package it - into `desktop/dist/`. Nothing outside `desktop/` is written to."),
 ("table", (
-    ["Step", "Result"],
+    ["Platform", "Script", "Produces"],
     [
-        ["1. Build the backend", "Staged beside the shell as `mCollaborator-server.exe` - the same binary the server release ships"],
-        ["2. Regenerate the icon", "The Cyberteq mark, because the default icon was rejected"],
-        ["3. Build the Wails app", "`mCollaborator.exe`"],
-        ["4. Package", "`mCollaborator-amd64-installer.exe` when NSIS is present"],
-    ]), [2.0, 4.5]),
-("p", "Everything lands in `desktop/dist/`, and nothing outside `desktop/` is written to. "
-      "Those three executables are tracked with **Git LFS**: a clone without `git lfs "
-      "install` gets 133-byte pointer stubs instead of programs. Linux and macOS builds "
-      "are wanted but not yet produced."),
+        ["Windows", "`.\\build.ps1`", "`mCollaborator.exe` and the NSIS installer"],
+        ["macOS", "`./build-macos.sh`", "A universal `mCollaborator.app` and a `.dmg`"],
+        ["Linux", "`./build-linux.sh`", "The binaries and a `.deb`"],
+    ]), [1.2, 1.9, 3.4]),
+("p", "Each takes the same shape of arguments: `-SkipServer` / `--skip-server` reuses the "
+      "staged server binary, and `-NoInstaller`, `--no-dmg` and `--no-deb` stop before "
+      "packaging. The shipping Windows executables are tracked with **Git LFS**: a clone "
+      "without `git lfs install` gets 133-byte pointer stubs instead of programs."),
+
+("h3", "Why each build has to run on its own operating system"),
+("p", "The server cross-compiles from anywhere. It is pure Go - its SQLite driver is "
+      "`modernc.org/sqlite` rather than a cgo one - so one Windows machine produces every "
+      "server binary the three packages need, for both architectures of each."),
+("p", "The shell does not. Wails' window is cgo: WebKit on macOS, GTK and WebKit on Linux. "
+      "The trap is that this does not announce itself. `GOOS=darwin go build` from Windows "
+      "**succeeds**, because without Wails' own `-tags desktop,production` the build "
+      "selects `app_default_unix.go`, a no-op frontend. The binary links, it runs, and it "
+      "opens no window. Adding the tags the real build uses gives the honest answer:"),
+("code", """
+$ GOOS=linux go build -tags desktop,production .
+internal/frontend/desktop/linux/window.go: undefined: Frontend
+$ GOOS=linux CGO_ENABLED=1 go build -tags desktop,production .
+cgo: C compiler "gcc" not found
+"""),
+("p", "So a shell binary must never be built without those tags. It is the same rule the "
+      "PDF conversion follows: a plausible-looking artefact shipped under the real one's "
+      "name is worse than no artefact at all. `.github/workflows/desktop-release.yml` "
+      "builds each platform on its own runner instead, and checks what it produced - that "
+      "the `.app` carries its server and is genuinely universal, and that the `.deb` "
+      "installs where it says it does and its server answers `/health`. Run it from the "
+      "Actions tab, or push a `v*` tag for a draft release with all three attached."),
+
+("h3", "macOS"),
+("bullets", [
+    "The server is built for both architectures and `lipo`-ed, so one bundle runs on "
+    "Apple Silicon and Intel. It is staged **inside** the bundle at "
+    "`Contents/MacOS/mCollaborator-server`, beside the shell, which is where the shell "
+    "looks; a bundle without it launches and then shows its start-up failure.",
+    "The `.dmg` carries an `Applications` symlink, so it is a drag-and-drop install "
+    "rather than a folder the recipient has to know what to do with.",
+    "**Signing is optional and unset by default.** Unsigned, another Mac reports "
+    "“mCollaborator is damaged and can’t be opened” - which is Gatekeeper’s wording for "
+    "unsigned, not a corrupt download. Set `MACOS_SIGN_IDENTITY` and "
+    "`MACOS_NOTARY_PROFILE` to sign and notarise, or the recipient clears the quarantine "
+    "flag with `xattr -dr com.apple.quarantine`.",
+]),
+
+("h3", "Linux"),
+("table", (
+    ["Path", "What"],
+    [
+        ["`/usr/lib/mcollaborator/mCollaborator`", "The shell"],
+        ["`/usr/lib/mcollaborator/mCollaborator-server`", "The server it runs"],
+        ["`/usr/bin/mcollaborator`", "A symlink to the shell"],
+        ["`/usr/share/applications/mcollaborator.desktop`", "The launcher entry"],
+        ["`~/.config/mCollaborator/`", "Database, evidence, reports and logs"],
+    ]), [3.0, 3.2]),
+("bullets", [
+    "Both executables share one private directory because the shell finds its server as a "
+    "sibling of its own. The `/usr/bin` entry being a symlink is safe: `os.Executable()` "
+    "reads `/proc/self/exe` on Linux, which resolves it, so the lookup lands where the "
+    "server actually is.",
+    "**The WebKit version matters.** Wails links `webkit2gtk-4.0` by default and `4.1` "
+    "behind a build tag, and Ubuntu 24.04 and Debian 13 ship only 4.1. The script detects "
+    "which development files are present, builds against that one and writes the matching "
+    "`Depends:` - assuming either one yields a package that installs cleanly and then dies "
+    "on a missing shared library.",
+    "Removing the package leaves `~/.config/mCollaborator` alone, on the same reasoning "
+    "the NSIS installer leaves `%APPDATA%`: an uninstall must not take a pentest’s "
+    "findings with it.",
+]),
+("p", "PDF export on both platforms is LibreOffice-only; there is no Word path. The DOCX "
+      "and the closing-meeting deck are unaffected - they are generated in Go - but a "
+      "machine without LibreOffice gets the DOCX and the reason there is no PDF."),
+("p", "**Neither package has yet been opened by a person.** CI has no display, so it "
+      "verifies the structure and the server but not the window. Run the `.dmg` and the "
+      "`.deb` once by hand before either is given to anyone."),
 
 ("pagebreak",),
 
 # ---------------------------------------------------- 14. Testing and quality
 ("h2", "Testing and Quality"),
-("p", "`go test ./...` in `backend/` runs the whole suite in a few seconds. It renders "
-      "real documents from the embedded templates and inspects the resulting OOXML, which "
-      "is why it can pin things that are otherwise only visible by opening the file."),
+("p", "`go test ./...` in `backend/` runs the whole suite in a few seconds; `desktop/` has "
+      "its own, smaller one. It renders real documents from the embedded templates and "
+      "inspects the resulting OOXML, which is why it can pin things that are otherwise "
+      "only visible by opening the file."),
+("p", "One group is worth separating out. The renderers' correctness tests ask whether the "
+      "right content reached the document; the **layout** tests ask what it looks like, "
+      "and every one of them is a regression for something a reader saw on screen and the "
+      "others could not - a table printed entirely in bold, a scope table holding a band "
+      "of empty cells, a ring with three of its four panels blank, evidence stretched out "
+      "of shape."),
 
 ("h3", "What the suite pins"),
 ("table", (
@@ -325,6 +476,7 @@ PART_B = [
         ["Cover and logo", "The logo reaches all three running headers and the title page; it is anchored, page-positioned and scaled to the banner box; nothing appears when no logo was uploaded"],
         ["Footers", "The client name resolves; no previous client's name survives; items stay spaced apart; the landscape footer keeps its size"],
         ["Closure deck", "Deck structure; it uses the engagement's own data; every screenshot is embedded; issues are grouped by area and severity"],
+        ["Deck layout", "`pptxlayout_test.go`: only the title and the host label are bold and set in the bold face; the criticality matches the report's colour; the scope table leaves no empty row; the period and total bullets are filled; one area spreads around the ring and the panels read left column first; the logo is centred in the ring; extra screenshots are marked (Cont'd) and keep their aspect ratio; an empty severity segment loses its label; one bar is not drawn across the plot"],
         ["Desktop shell", "The report fetcher rejects foreign URLs, reads from the supervised server, reports a server error, and file names are made safe"],
         ["Contract", "The wizard payload matches what the renderer expects"],
     ]), [1.7, 4.8]),
@@ -380,6 +532,19 @@ PART_B = [
         ["The cloned repository's executables are 133 bytes",
          "Git LFS is not installed, so the files are pointer stubs",
          "`git lfs install` then `git lfs pull`"],
+        ["macOS says the app is damaged and can't be opened",
+         "Gatekeeper's wording for an unsigned build, not a corrupt download",
+         "`xattr -dr com.apple.quarantine /Applications/mCollaborator.app`, or build with "
+         "`MACOS_SIGN_IDENTITY` set"],
+        ["The `.deb` installs but the app will not start, naming a missing library",
+         "It was built against a webkit2gtk the target release does not ship - 4.0 on "
+         "Ubuntu 24.04 or Debian 13, which carry only 4.1",
+         "Rebuild on a machine with the target's own development files; `build-linux.sh` "
+         "picks the right one and writes the matching `Depends:`"],
+        ["A shell binary built by hand opens no window",
+         "It was built without `-tags desktop,production`, so it carries Wails' no-op "
+         "default frontend",
+         "Build through the platform's script; never `go build` the shell directly"],
         ["Two analysts' edits to one finding overwrite each other",
          "Writes are last-write-wins today",
          "Coordinate for now; see Future Improvements"],
@@ -437,16 +602,20 @@ PART_B = [
 ("h3", "Product"),
 ("bullets", [
     "**Live updates** over a websocket, replacing the 15-second poll.",
-    "**Linux and macOS desktop builds** - the shell is cross-platform, only the Windows "
-    "installer exists.",
     "**Retesting support**: mark a finding retested, carry the previous result into the "
     "next report and show what closed since the last engagement.",
     "**Report templates beyond VAPT** - the merge engine is not specific to this template, "
     "but the area definitions and the checklist logic currently are.",
     "**Multi-organisation support.** Everything is scoped to one seeded organisation "
     "today.",
-    "**Continuous integration** running `go test ./...` and building both binaries on "
-    "every push, so a broken renderer is caught before it reaches a delivery week.",
+    "**Continuous integration on every push.** The desktop release workflow builds all "
+    "three packages, but only on demand or on a tag; running `go test ./...` on every "
+    "push would catch a broken renderer before it reaches a delivery week.",
+    "**Code signing on Windows and macOS.** SmartScreen warns and Gatekeeper refuses "
+    "until the executables are signed; the macOS build already takes an identity if one "
+    "is provided, and the Windows build has no equivalent yet.",
+    "**RPM and Arch packages.** The `.deb` covers Debian, Ubuntu and Mint; anyone else "
+    "runs the two binaries directly.",
 ]),
 
 ("pagebreak",),

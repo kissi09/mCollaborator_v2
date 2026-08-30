@@ -168,20 +168,20 @@ PART_A = [
         ["`handlers.go`", "795", "Every API handler except report and deck export"],
         ["`models.go`", "206", "The domain types and the API envelope"],
         ["`store.go`", "710", "In-memory store, sessions, seeding, audit and activity"],
-        ["`db.go`", "318", "SQLite snapshot persistence and the persist middleware"],
+        ["`db.go`", "319", "SQLite snapshot persistence and the persist middleware"],
         ["`report.go`", "539", "`ReportConfig`, export handlers, file naming, deck handler"],
-        ["`docxmcollab.go`", "1769", "The DOCX renderer: areas, findings, tables, TOC, charts"],
+        ["`docxmcollab.go`", "1781", "The DOCX renderer: areas, findings, tables, TOC, charts"],
         ["`docxmcollabpkg.go`", "510", "Package assembly: parts, relationships, customer logo"],
-        ["`docxxml.go`", "494", "The OOXML helpers every renderer shares"],
+        ["`docxxml.go`", "556", "The OOXML helpers every renderer shares"],
         ["`docxtestcases.go`", "373", "Test-type checklist derivation (Pass / Issues)"],
         ["`docxfooter.go`", "320", "Footer tab-stop fitting"],
         ["`docxlogo.go`", "211", "Logo decoding: SVG rasterising, WEBP, scaling"],
         ["`docxpoc.go`", "106", "Screenshot parts and the inline / anchored drawing XML"],
         ["`docx2pdf.go`", "262", "Word COM and LibreOffice conversion"],
-        ["`pptxclosure.go`", "460", "Closure deck package handling and slide cloning"],
-        ["`pptxslides.go`", "615", "Slide filling: issues tables, scenarios, media, logo"],
-        ["`pptxsummary.go`", "496", "Executive summary panels and their fitting"],
-        ["`pptxcharts.go`", "196", "Rebuilding the deck's donut and bar charts"],
+        ["`pptxclosure.go`", "462", "Closure deck package handling and slide cloning"],
+        ["`pptxslides.go`", "902", "Slide filling: issues tables, scenarios, media, logo"],
+        ["`pptxsummary.go`", "668", "Executive summary panels and their fitting"],
+        ["`pptxcharts.go`", "259", "Rebuilding the deck's donut and bar charts"],
         ["`onedrive.go`", "267", "Microsoft Graph client-credential upload"],
     ]), [1.9, 0.7, 3.9]),
 
@@ -204,7 +204,11 @@ PART_A = [
          "Generated deliverables. Git-ignored - these carry client findings."],
         ["`desktop/`",
          "The Wails shell: `main.go`, `server.go`, `reports.go`, platform files, "
-         "`build.ps1`, `wails.json`, and `dist/` with the shipping binaries"],
+         "`wails.json`, one build script per platform (`build.ps1`, `build-macos.sh`, "
+         "`build-linux.sh`) and `dist/` with the shipping binaries"],
+        ["`.github/workflows/`",
+         "`desktop-release.yml`, which builds the Windows, macOS and Linux packages on "
+         "their own runners - the only place the last two can be built at all"],
         ["`docs/`",
          "This document, the iteration notes, the collaboration and SharePoint design "
          "papers, and the template assets"],
@@ -442,15 +446,24 @@ go test ./...
 ("p", "The criticality word itself is coloured; the cell keeps the template's own "
       "background, so a rating reads as a coloured word rather than a block of colour "
       "with white text knocked out of it."),
+("p", "The values are the fills the report's own criticality-criteria legend uses for "
+      "each band, sampled from that legend rather than chosen. `severityHex` in "
+      "`docxmcollab.go` is the single definition, and the closing-meeting deck reads the "
+      "same function - a deck that disagreed with the document it summarises is the "
+      "version a client would notice."),
 ("table", (
     ["Severity", "Hex", "Note"],
     [
-        ["Critical", "C00000", "Deep red"],
-        ["High", "FF7900", "Cyberteq orange"],
-        ["Medium", "BF8F00", "Darker than the amber the criteria table fills a cell with, which is illegible as text on white"],
-        ["Low", "28A745", "Green"],
-        ["Informational", "2F6FED", "Blue"],
+        ["Critical", "FF0000", "Red"],
+        ["High", "F68831", "Orange"],
+        ["Medium", "FFC000", "Amber"],
+        ["Low", "92D050", "Green"],
+        ["Informational", "00B0F0", "Blue"],
     ]), [1.3, 1.0, 4.2]),
+("p", "Earlier revisions darkened Medium and Low for contrast against white and used a "
+      "deeper red and blue at the ends. That made the register disagree with the legend "
+      "printed two pages before it, which is the one thing a reader has to compare it "
+      "against. Do not adjust one band in isolation."),
 
 ("pagebreak",),
 
