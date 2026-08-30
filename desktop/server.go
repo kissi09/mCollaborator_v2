@@ -16,16 +16,33 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
-// serverBinaryNames are the names the backend may have been built under,
-// newest first. The installer ships it as mCollaborator-server.exe so it is
-// obvious which of the two executables in the install directory is which.
+// serverBinaryNames are the names the backend may have been built under, most
+// specific first. Every installer ships it as mCollaborator-server so it is
+// obvious which of the two executables beside each other is which; the plain
+// name is the fallback for a checkout where the server was built with `go build`
+// and took its directory's name.
+//
+// Both the suffixed and unsuffixed forms are listed because one binary is
+// looked for from three different layouts: beside mCollaborator.exe in Program
+// Files, inside mCollaborator.app/Contents/MacOS, and in
+// /usr/lib/mcollaborator. Listing only the .exe names is why the shell
+// compiled for macOS and Linux but could never have found its server there.
 var serverBinaryNames = []string{
-	"mCollaborator-server.exe",
-	"mCollaborator.exe",
+	"mCollaborator-server" + exeSuffix,
+	"mCollaborator" + exeSuffix,
 }
+
+// exeSuffix is what this platform puts on the end of an executable.
+var exeSuffix = func() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}()
 
 // devServerDirs are checked when the app is run from a source checkout rather
 // than an install, so `wails dev` works without staging a build first.

@@ -1,0 +1,175 @@
+name: Desktop installers
+
+# Builds the mCollaborator desktop app for all three platforms.
+#
+# This workflow exists because the macOS and Linux installers cannot be built
+# on the Windows machine the app is developed on. The shell is a Wails app and
+# its window is cgo - WebKit on macOS, GTK and WebKit on Linux - so each build
+# has to happen on its own operating system. `go build` without Wails' own tags
+# will cross-compile a binary from anywhere, but that binary carries Wails'
+# no-op default frontend and opens no window, which is worse than no binary at
+# all.
+#
+# Run it from the Actions tab (Run workflow), or push a v* tag to get a release
+# with all three installers attached.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  WAILS_VERSION: v2.15.0
+
+jobs:
+  macos:
+    name: macOS (.app + .dmg)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The shipping Windows binaries are LFS objects. They are not needed
+          # to build, and pulling 60MB of them for every run is not worth it.
+          lfs: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build
+        working-directory: desktop
+        run: |
+          chmod +x build-macos.sh
+          ./build-macos.sh --arch universal
+        # Signing is left to whoever has the certificate. Set the repository
+        # secrets and add them here to produce a build Gatekeeper accepts:
+        #   MACOS_SIGN_IDENTITY, MACOS_NOTARY_PROFILE
+
+      - name: Check the bundle carries its server
+        working-directory: desktop
+        run: |
+          test -x dist/mCollaborator.app/Contents/MacOS/mCollaborator
+          test -x dist/mCollaborator.app/Contents/MacOS/mCollaborator-server
+          lipo -archs dist/mCollaborator.app/Contents/MacOS/mCollaborator-server
+          # An app whose server is missing launches and then fails on startup,
+          # which no compile step would have caught.
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcollaborator-macos
+          path: desktop/dist/*.dmg
+          if-no-files-found: error
+
+  linux:
+    name: Linux (.deb)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev dpkg-dev lintian
+          # 22.04 has 4.0 and 4.1 side by side. Installing 4.1 is deliberate:
+          # a package built against 4.0 will not start on 24.04 or Debian 13,
+          # which no longer ship it. build-linux.sh picks whichever it finds
+          # and depends on that one.
+          sudo apt-get install -y libwebkit2gtk-4.1-dev
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build
+        working-directory: desktop
+        run: |
+          chmod +x build-linux.sh
+          ./build-linux.sh
+
+      - name: Install the package and check what it put where
+        working-directory: desktop
+        run: |
+          sudo apt-get install -y ./dist/mcollaborator_*_amd64.deb
+          test -x /usr/lib/mcollaborator/mCollaborator
+          test -x /usr/lib/mcollaborator/mCollaborator-server
+          test -L /usr/bin/mcollaborator
+          test -f /usr/share/applications/mcollaborator.desktop
+          desktop-file-validate /usr/share/applications/mcollaborator.desktop
+          # The server half runs headless, so it can be started here. The shell
+          # cannot: there is no display on a CI runner.
+          PORT=9955 /usr/lib/mcollaborator/mCollaborator-server &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:9955/health && break || sleep 1
+          done
+          curl -fsS http://127.0.0.1:9955/health
+          sudo apt-get remove -y mcollaborator
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcollaborator-linux
+          path: desktop/dist/*.deb
+          if-no-files-found: error
+
+  windows:
+    name: Windows (.exe + installer)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
+
+      - name: Install Wails and NSIS
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+          choco install nsis -y --no-progress
+
+      - name: Build
+        working-directory: desktop
+        shell: pwsh
+        run: ./build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcollaborator-windows
+          path: desktop/dist/*installer.exe
+          if-no-files-found: error
+
+  release:
+    name: Attach the installers to the release
+    needs: [macos, linux, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true
+          # Draft, so nothing reaches a client until a person has looked at it.

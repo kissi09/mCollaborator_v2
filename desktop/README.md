@@ -30,29 +30,69 @@ there; if you copy them by hand, copy both.
 
 ## Building
 
-```powershell
-.\build.ps1
+One script per platform, all three doing the same three steps in the same order:
+build the server from `../backend`, regenerate the icon, then build the app and
+package it. Everything lands in `dist/`.
+
+| Platform | Script | Produces |
+|---|---|---|
+| Windows | `.\build.ps1` | `mCollaborator.exe` + NSIS installer |
+| macOS | `./build-macos.sh` | `mCollaborator.app` + `.dmg` |
+| Linux | `./build-linux.sh` | `mCollaborator` + `.deb` |
+
+**Each has to run on its own operating system.** See
+[Why there is no cross-compile](#why-there-is-no-cross-compile). If you do not
+have a Mac or a Linux machine to hand,
+`../.github/workflows/desktop-release.yml` builds all three on GitHub's runners
+— run it from the Actions tab, or push a `v*` tag to get a draft release with
+the installers attached.
+
+| Flag | Script | Effect |
+|---|---|---|
+| `-SkipServer` / `--skip-server` | all | Reuse the staged server binary instead of rebuilding it |
+| `-NoInstaller` | Windows | Build the `.exe` only, even when NSIS is available |
+| `--no-dmg` | macOS | Build the `.app` only |
+| `--no-deb` | Linux | Build the binaries only |
+| `--arch` | macOS | `universal` (default), `arm64` or `amd64` |
+
+### Why there is no cross-compile
+
+The server cross-compiles from anywhere — it is pure Go, its SQLite driver is
+`modernc.org/sqlite` rather than a cgo one, so one Windows machine can produce
+every server binary the three packages need.
+
+The shell cannot. Wails' window is cgo: WebKit on macOS, GTK and WebKit on
+Linux. The trap is that this does not announce itself — `go build` for
+`GOOS=darwin` from Windows **succeeds**, because without Wails' own
+`-tags desktop,production` the build selects `app_default_unix.go`, a no-op
+frontend. The binary links, runs, and opens no window. Add the tags the real
+build uses and you get the honest answer:
+
+```
+$ GOOS=linux go build -tags desktop,production .
+internal/frontend/desktop/linux/window.go: undefined: Frontend   # cgo files excluded
+$ GOOS=linux CGO_ENABLED=1 go build -tags desktop,production .
+cgo: C compiler "gcc" not found
 ```
 
-Three steps: build the server from `../backend`, regenerate the icon, then build
-the app and — if NSIS is installed — the installer. Everything lands in `dist/`.
-
-| Flag | Effect |
-|---|---|
-| `-SkipServer` | Reuse the staged server binary instead of rebuilding it |
-| `-NoInstaller` | Build the `.exe` only, even when NSIS is available |
+So never ship a shell binary built without those tags. It is the silent
+degraded artefact this project already has a rule against.
 
 ### Prerequisites
 
-| Tool | Needed for | Install |
-|---|---|---|
-| Go 1.21+ | everything | already present |
-| Wails CLI v2 | the app | `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
-| WebView2 runtime | running the app | ships with Windows 10/11; the installer also checks |
-| NSIS | the installer only | `winget install NSIS.NSIS` |
+| Tool | Platform | Needed for | Install |
+|---|---|---|---|
+| Go 1.21+ | all | everything | already present |
+| Wails CLI v2 | all | the app | `go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0` |
+| WebView2 runtime | Windows | running the app | ships with Windows 10/11; the installer also checks |
+| NSIS | Windows | the installer only | `winget install NSIS.NSIS` |
+| Xcode command line tools | macOS | the app, `lipo`, `codesign`, `hdiutil` | `xcode-select --install` |
+| gcc, GTK 3 and WebKit headers | Linux | the app | see [Linux](#linux) |
+| `dpkg-dev` | Linux | the `.deb` only | `sudo apt install dpkg-dev` |
 
-No C compiler and no Node/npm are required. Wails needs neither on Windows, and
-this project has no frontend build step — the UI is served by the backend.
+No Node/npm is required anywhere — this project has no frontend build step, the
+UI is served by the backend. A C compiler is not needed on Windows; it is on
+macOS and Linux, where Wails' window is cgo.
 
 ## The icon
 
@@ -105,18 +145,86 @@ undo both.
   same step does get applied. The **installer** carries correct metadata, so
   Programs and Features looks right. Fixable with a hand-generated `.syso` if it
   starts to matter.
-- **Unsigned.** SmartScreen will warn on first run until the executables are
-  signed with a code-signing certificate.
+- **Unsigned everywhere.** SmartScreen warns on Windows and Gatekeeper refuses
+  on macOS until the executables are signed. `build-macos.sh` takes a signing
+  identity if you have one; the Windows build has no equivalent yet.
+- **The macOS and Linux packages have never been run by a person.** They are
+  built and smoke-tested by
+  [`../.github/workflows/desktop-release.yml`](../.github/workflows/desktop-release.yml)
+  — the `.deb` is installed, its layout checked and its server started — but a
+  CI runner has no display, so nothing has yet opened the window on either
+  platform. Do that once before handing either to anyone.
 - **PDF export still needs Word or LibreOffice** on the machine. The desktop app
   changes nothing about that: it runs the same server, which looks for the same
   engines. On Windows with Office installed, this is already satisfied.
 
-## macOS and Linux
+## macOS
 
-`main.go` and `server.go` are portable, and `proc_other.go` / `fatal_other.go`
-cover the platform-specific pieces, so the shell itself should build for both.
-Two things stand between that and a shippable build:
+`build-macos.sh` produces a universal `mCollaborator.app` — the server is built
+for both architectures and `lipo`-ed, so one bundle runs on Apple Silicon and
+Intel — and wraps it in a `.dmg` with the usual drag-to-Applications layout.
 
-- Wails cannot cross-compile. macOS and Linux builds must run on those
-  platforms — unlike the server, which cross-compiles from anywhere.
-- PDF export on macOS and Linux is LibreOffice-only; there is no Word path.
+The server goes **inside** the bundle, at `Contents/MacOS/mCollaborator-server`,
+which is where the shell looks: beside its own executable. A bundle without it
+launches and then shows its startup failure.
+
+**Signing is optional and unset by default.** An unsigned build opens fine on
+the machine that made it and, on any other Mac, gives *"mCollaborator is damaged
+and can't be opened"* — which is Gatekeeper's wording for unsigned, not a
+corrupt download. Either clear the quarantine flag on the receiving machine:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/mCollaborator.app
+```
+
+or set `MACOS_SIGN_IDENTITY` (a Developer ID Application identity) and
+`MACOS_NOTARY_PROFILE` (a stored `notarytool` profile) before building, and the
+script signs inside-out and notarises.
+
+## Linux
+
+`build-linux.sh` produces a `.deb`:
+
+```bash
+sudo apt install ./dist/mcollaborator_3.0.0_amd64.deb
+```
+
+| Path | What |
+|---|---|
+| `/usr/lib/mcollaborator/mCollaborator` | the shell |
+| `/usr/lib/mcollaborator/mCollaborator-server` | the server it runs |
+| `/usr/bin/mcollaborator` | symlink to the shell |
+| `/usr/share/applications/mcollaborator.desktop` | the launcher entry |
+| `~/.config/mCollaborator/` | database, evidence, reports, logs |
+
+Both executables live in one private directory because the shell finds its
+server as a sibling of its own. The `/usr/bin` entry being a symlink is safe:
+`os.Executable()` reads `/proc/self/exe` on Linux, which resolves it, so the
+lookup lands in `/usr/lib/mcollaborator` where the server actually is.
+
+Removing the package deliberately leaves `~/.config/mCollaborator` alone. An
+uninstall must not take a pentest's findings with it — the same rule the NSIS
+installer follows.
+
+**WebKit version matters.** Wails links `webkit2gtk-4.0` by default and `4.1`
+behind a build tag. Ubuntu 24.04 and Debian 13 ship only 4.1; older releases
+only 4.0. The script detects which development files are present, builds against
+that one, and writes the matching `Depends:` — because getting it wrong yields a
+package that installs cleanly and then fails to start on a missing shared
+library.
+
+Build dependencies:
+
+```bash
+sudo apt install build-essential pkg-config libgtk-3-dev dpkg-dev \
+                 libwebkit2gtk-4.1-dev   # or -4.0-dev on older releases
+```
+
+### Both platforms
+
+PDF export on macOS and Linux is LibreOffice-only; there is no Word path. The
+DOCX and the closure deck are unaffected — they are generated in Go — but a
+machine without LibreOffice returns the DOCX and says why there is no PDF.
+
+RPM and an Arch package are not built. The `.deb` covers Debian, Ubuntu and
+Mint; anyone else can run the two binaries out of `dist/` directly.

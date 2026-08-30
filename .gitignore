@@ -35,6 +35,10 @@ Thumbs.db
 # Live application state — a running server's database, its WAL, and the
 # evidence files uploaded into it. Real engagement data, never source.
 backend/data/
+# A server started from the repository root rather than backend/ writes its
+# database here instead - which is how one appeared during a smoke test. The
+# path is ignored wherever it lands, not only where it is meant to.
+/data/
 backend/*.pid
 
 # Editor / pre-refactor backups kept locally
