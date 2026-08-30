@@ -43,7 +43,7 @@ package it. Everything lands in `dist/`.
 **Each has to run on its own operating system.** See
 [Why there is no cross-compile](#why-there-is-no-cross-compile). If you do not
 have a Mac or a Linux machine to hand,
-`../.github/workflows/desktop-release.yml` builds all three on GitHub's runners
+[`ci/desktop-release.yml`](ci/) builds all three on GitHub's runners
 — run it from the Actions tab, or push a `v*` tag to get a draft release with
 the installers attached.
 
@@ -150,7 +150,7 @@ undo both.
   identity if you have one; the Windows build has no equivalent yet.
 - **The macOS and Linux packages have never been run by a person.** They are
   built and smoke-tested by
-  [`../.github/workflows/desktop-release.yml`](../.github/workflows/desktop-release.yml)
+  [`ci/desktop-release.yml`](ci/)
   — the `.deb` is installed, its layout checked and its server started — but a
   CI runner has no display, so nothing has yet opened the window on either
   platform. Do that once before handing either to anyone.

@@ -206,9 +206,11 @@ PART_A = [
          "The Wails shell: `main.go`, `server.go`, `reports.go`, platform files, "
          "`wails.json`, one build script per platform (`build.ps1`, `build-macos.sh`, "
          "`build-linux.sh`) and `dist/` with the shipping binaries"],
-        ["`.github/workflows/`",
+        ["`desktop/ci/`",
          "`desktop-release.yml`, which builds the Windows, macOS and Linux packages on "
-         "their own runners - the only place the last two can be built at all"],
+         "their own runners - the only place the last two can be built at all. Parked "
+         "here rather than in `.github/workflows/`; `ci/README.md` says why and how to "
+         "activate it"],
         ["`docs/`",
          "This document, the iteration notes, the collaboration and SharePoint design "
          "papers, and the template assets"],

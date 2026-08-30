@@ -10,8 +10,8 @@
 # against GTK and WebKit, so it cannot be cross-compiled from Windows or macOS -
 # `go build` without -tags production will happily produce a binary anyway, but
 # that binary contains Wails' no-op default frontend and opens no window at all.
-# See ../.github/workflows/desktop-release.yml for building this without a Linux
-# machine to hand.
+# See ci/desktop-release.yml for building this without a Linux machine to hand -
+# and ci/README.md for why that file is parked there rather than being live.
 #
 # Build dependencies (Debian/Ubuntu):
 #   sudo apt install build-essential pkg-config libgtk-3-dev dpkg-dev \

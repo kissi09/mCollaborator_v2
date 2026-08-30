@@ -10,8 +10,8 @@
 # cgo against WebKit, so it cannot be cross-compiled from Windows or Linux -
 # `go build` without -tags production will happily produce a binary anyway, but
 # that binary contains Wails' no-op default frontend and opens no window at all.
-# See ../.github/workflows/desktop-release.yml for building this without a Mac
-# to hand.
+# See ci/desktop-release.yml for building this without a Mac to hand - and
+# ci/README.md for why that file is parked there rather than being live.
 #
 # Usage:
 #   ./build-macos.sh                 universal (arm64 + x86_64), unsigned

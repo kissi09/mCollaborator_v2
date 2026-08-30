@@ -398,11 +398,12 @@ cgo: C compiler "gcc" not found
 """),
 ("p", "So a shell binary must never be built without those tags. It is the same rule the "
       "PDF conversion follows: a plausible-looking artefact shipped under the real one's "
-      "name is worse than no artefact at all. `.github/workflows/desktop-release.yml` "
+      "name is worse than no artefact at all. `desktop/ci/desktop-release.yml` "
       "builds each platform on its own runner instead, and checks what it produced - that "
       "the `.app` carries its server and is genuinely universal, and that the `.deb` "
       "installs where it says it does and its server answers `/health`. Run it from the "
       "Actions tab, or push a `v*` tag for a draft release with all three attached."),
+("p", "The workflow currently sits in `desktop/ci/` rather than `.github/workflows/`, so it is committed but not yet live. GitHub refuses a push from an OAuth app that creates or updates anything under `.github/workflows/` unless the token carries the `workflow` scope, and the token this repository pushes with does not. `desktop/ci/README.md` carries the two commands that put it in place - one to grant the scope, one to move the file."),
 
 ("h3", "macOS"),
 ("bullets", [
