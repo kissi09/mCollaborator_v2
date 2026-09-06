@@ -147,10 +147,11 @@ function renderClosurePrep() {
         </div>
 
         <div id="closure-result" style="border:1px solid var(--border);border-radius:var(--radius);padding:32px;background:var(--bg);min-height:160px;">
+          ${s.lastClosureResult ? closureResultHtml(s.lastClosureResult) : `
           <div style="text-align:center;color:var(--muted);padding:28px 0;">
             <div style="font-size:32px;margin-bottom:8px;">&#127909;</div>
             <p>Generate the closing meeting deck from this engagement.</p>
-          </div>
+          </div>`}
         </div>
 
         <div style="display:flex;justify-content:flex-end;margin-top:20px;">
@@ -247,39 +248,48 @@ async function openGeneratedReport(kind) {
 
 // generateClosureDeck posts the wizard's engagement to the closure endpoint and
 // shows the result, including which findings will have no scenario slide.
+// closureResultHtml renders one /reports/closure response. Split out for the
+// same reason as reportResultHtml: the panel is redrawn from the stored
+// response every time Closure Prep is re-entered, so the PPTX stays reachable.
+function closureResultHtml(data) {
+  const url = data?.pptx_url;
+  const unproven = data?.findings_without_proof || [];
+  const deckLogoError = data?.logo_error;
+
+  const logoWarning = deckLogoError ? `
+    <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
+      &#9888; The client logo is not on the title slide: ${sanitizeInput(deckLogoError)}
+    </div>` : '';
+
+  const warning = unproven.length ? `
+    <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
+      &#9888; ${unproven.length} finding${unproven.length === 1 ? ' has' : 's have'} no evidence attached, so
+      ${unproven.length === 1 ? 'it gets' : 'they get'} no scenario slide:
+      <ul style="margin:6px 0 0 18px;">${unproven.map(f => `<li>${sanitizeInput(f)}</li>`).join('')}</ul>
+      <span class="text-xs">Attach a screenshot in the Evidence vault and generate again.</span>
+    </div>` : '';
+
+  return `
+    <div style="text-align:center;padding:24px 0;">
+      <div style="font-size:32px;margin-bottom:8px;">&#9989;</div>
+      <p class="font-semibold mb-4">Closing deck ready</p>
+      ${reportFileButtons('pptx', url, '&#128202;', 'PPTX')}
+      ${warning}
+      ${logoWarning}
+    </div>`;
+}
+
+// generateClosureDeck posts the wizard's engagement to the closure endpoint and
+// shows the result, including which findings will have no scenario slide.
 async function generateClosureDeck() {
   const btn = document.querySelector('[onclick="generateClosureDeck()"]');
   if (btn) btn.disabled = true;
   showToast('Building the closing deck...', 'info');
   try {
     const res = await api.post('/reports/closure', reportWizardPayload());
-    const url = res.data?.pptx_url;
-    const unproven = res.data?.findings_without_proof || [];
-    const deckLogoError = res.data?.logo_error;
-
+    reportWizardState.lastClosureResult = res.data;
     const box = document.getElementById('closure-result');
-    if (box) {
-      const logoWarning = deckLogoError ? `
-        <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
-          &#9888; The client logo is not on the title slide: ${sanitizeInput(deckLogoError)}
-        </div>` : '';
-
-      const warning = unproven.length ? `
-        <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
-          &#9888; ${unproven.length} finding${unproven.length === 1 ? ' has' : 's have'} no evidence attached, so
-          ${unproven.length === 1 ? 'it gets' : 'they get'} no scenario slide:
-          <ul style="margin:6px 0 0 18px;">${unproven.map(f => `<li>${sanitizeInput(f)}</li>`).join('')}</ul>
-          <span class="text-xs">Attach a screenshot in the Evidence vault and generate again.</span>
-        </div>` : '';
-      box.innerHTML = `
-        <div style="text-align:center;padding:24px 0;">
-          <div style="font-size:32px;margin-bottom:8px;">&#9989;</div>
-          <p class="font-semibold mb-4">Closing deck ready</p>
-          ${reportFileButtons('pptx', url, '&#128202;', 'PPTX')}
-          ${warning}
-          ${logoWarning}
-        </div>`;
-    }
+    if (box) box.innerHTML = closureResultHtml(res.data);
     showToast('Closing deck ready', 'success');
   } catch (e) {
     showToast('Could not build the deck: ' + (e.message || 'Unknown error'), 'error');
@@ -561,108 +571,242 @@ async function markEngagementCompleted(engId) {
 }
 
 // -------- mCollaborator: FINDING EDITOR --------
-function renderFindingEditor() {
-  return `
-    <div class="editor-pane" style="height:calc(100vh - 64px - 48px);margin:-24px;">
-      <div class="editor-left">
-        <div class="flex items-center justify-between px-6 py-3 border-b" style="background:var(--surface);">
-          <span class="text-xs font-mono text-muted">Finding Details</span>
-        </div>
-        <div style="padding:16px;overflow-y:auto;flex:1;">
-          <div style="margin-bottom:16px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Title</label>
-            <input class="input w-full" id="finding-title" value="SQL Injection in Login Module" placeholder="Finding title...">
-          </div>
-          <div style="margin-bottom:16px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Description</label>
-            <textarea class="input w-full" id="finding-description" rows="4" placeholder="Describe the vulnerability..." style="resize:vertical;font-family:var(--font-mono);font-size:12px;">The authentication endpoint is vulnerable to SQL injection. User input from the username parameter is directly concatenated into the SQL query without proper sanitization.</textarea>
-          </div>
-          <div style="margin-bottom:16px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Impact</label>
-            <textarea class="input w-full" id="finding-impact" rows="3" placeholder="Business & technical impact..." style="resize:vertical;font-family:var(--font-mono);font-size:12px;">An attacker can bypass authentication, extract sensitive user data, and potentially gain unauthorized access to the entire application database.</textarea>
-          </div>
-          <div style="margin-bottom:16px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">CVSS Vector String</label>
-            <input class="input w-full" id="finding-cvss-vector" value="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" placeholder="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" style="font-family:var(--font-mono);font-size:12px;">
-          </div>
-          <div style="margin-bottom:16px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Affected System</label>
-            <input class="input w-full" id="finding-affected" value="Login Module - /v1/auth/login" placeholder="Target system / endpoint..." style="font-family:var(--font-mono);font-size:12px;">
-          </div>
-          <div style="margin-bottom:16px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Proof of Concept (POC)</label>
-            <div style="position:relative;">
-              <textarea class="input w-full" id="finding-poc" rows="4" placeholder="Detailed steps to reproduce..." style="resize:vertical;font-family:var(--font-mono);font-size:12px;">POST /v1/auth/login
-{"username": "admin' OR '1'='1", "password": "test"}
+//
+// Two panes: the form on the left, and on the right a live preview of how the
+// finding reads once it is in the report. The preview is redrawn on every
+// keystroke, so what is being typed and what the client will read are on screen
+// at the same time.
+//
+// The form used to open pre-filled with a worked SQL-injection example baked
+// into the markup. On "+ New Finding" that example was the starting text, and
+// anything left untouched was published as if it had been written - so the
+// fields start empty now and the example lives in the placeholders instead.
 
-Response: HTTP 200 with admin session token</textarea>
-              <div style="position:absolute;bottom:8px;right:8px;display:flex;gap:6px;">
-                <button type="button" onclick="document.getElementById('poc-image-input').click()" style="background:var(--surface-hover);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">+ Upload to Evidence</button>
-                <button type="button" onclick="showEvidencePickerForPoc()" style="background:var(--primary);color:var(--bg);border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">+ From Evidence</button>
-              </div>
-              <input type="file" id="poc-image-input" accept="image/*" style="display:none;" onchange="insertPocImage(this)">
+const FINDING_SEVERITIES = [
+  { value: 'critical', label: 'Critical' },
+  { value: 'high',     label: 'High' },
+  { value: 'medium',   label: 'Medium' },
+  { value: 'low',      label: 'Low' },
+  { value: 'info',     label: 'Informational' }
+];
+
+const FINDING_STATUSES = [
+  { value: 'draft',       label: 'Draft' },
+  { value: 'open',        label: 'Open' },
+  { value: 'in_progress', label: 'In Progress' }
+];
+
+// feField and friends keep the form's markup to the parts that differ, so a new
+// field is one line and every field carries the same label, spacing and hint.
+function feField(label, id, value, placeholder, opts) {
+  const o = opts || {};
+  return `
+    <div class="fe-field">
+      <label for="${id}">${label}${o.required ? ' <span style="color:var(--critical);">*</span>' : ''}</label>
+      <input class="input w-full" id="${id}" placeholder="${placeholder}"
+             ${o.type ? `type="${o.type}"` : ''} ${o.step ? `step="${o.step}"` : ''}
+             ${o.mono ? 'style="font-family:var(--font-mono);font-size:12px;"' : ''}
+             value="${sanitizeInput(String(value == null ? '' : value))}">
+      ${o.hint ? `<div class="fe-hint">${o.hint}</div>` : ''}
+    </div>`;
+}
+
+function feTextarea(label, id, value, placeholder, rows, hint) {
+  return `
+    <div class="fe-field">
+      <label for="${id}">${label}</label>
+      <textarea class="input w-full" id="${id}" rows="${rows}" placeholder="${placeholder}"
+                style="resize:vertical;line-height:1.6;">${sanitizeInput(value || '')}</textarea>
+      ${hint ? `<div class="fe-hint">${hint}</div>` : ''}
+    </div>`;
+}
+
+function feSelect(label, id, options, selected, hint) {
+  return `
+    <div class="fe-field">
+      <label for="${id}">${label}</label>
+      <select class="input w-full" id="${id}">
+        ${options.map(o => `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`).join('')}
+      </select>
+      ${hint ? `<div class="fe-hint">${hint}</div>` : ''}
+    </div>`;
+}
+
+function renderFindingEditor() {
+  const f = MCOLLABORATOR.currentFinding || {};
+  const isEdit = !!f.id;
+  const eng = MCOLLABORATOR.currentEngagement;
+  // Values are written into the markup rather than poked in afterwards, so the
+  // form never flashes one finding's text before another's arrives.
+  const area = normalizeAreaCode(f.category) || (REPORT_AREAS[0] && REPORT_AREAS[0].code);
+
+  return `
+    <div class="finding-editor" style="margin:-24px;">
+      <div class="fe-topbar">
+        <div class="flex items-center gap-3" style="min-width:0;">
+          <span class="status-pill ${isEdit ? 'in_progress' : 'draft'}">${isEdit ? 'Editing' : 'New finding'}</span>
+          <div style="min-width:0;">
+            <div class="font-display font-bold truncate" id="fe-topbar-title" style="font-size:15px;">
+              ${sanitizeInput(f.title || '') || 'Untitled finding'}
             </div>
-            <div id="finding-poc-evidence" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;"></div>
-            <input type="hidden" id="finding-evidence-ids" value="">
+            <div class="text-xs text-muted truncate">
+              ${eng ? sanitizeInput(eng.client_name || eng.name || '') : 'No engagement selected — open a project first'}
+            </div>
           </div>
-          <div style="margin-bottom:16px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);">Recommendation</label>
-            <textarea class="input w-full" id="finding-recommendation" rows="3" placeholder="Remediation steps..." style="resize:vertical;font-family:var(--font-mono);font-size:12px;">Use parameterized queries with prepared statements. Implement input validation and apply the principle of least privilege to database accounts.</textarea>
-          </div>
+        </div>
+        <div class="flex items-center gap-2" style="flex-shrink:0;">
+          <button class="btn btn-secondary" onclick="MCOLLABORATOR.navigate('#/ledger/project')">Discard</button>
+          <button class="btn btn-primary" onclick="saveFindingFromEditor()">
+            ${isEdit ? 'Save Changes' : 'Publish to Ledger'}
+          </button>
         </div>
       </div>
-      <div class="editor-right">
-        <div class="flex items-center justify-between px-6 py-3 border-b">
-          <span class="text-xs font-mono text-muted">Metadata</span>
-        </div>
-        <div style="padding:16px;border-bottom:1px solid var(--border);background:var(--bg);">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-            <div>
-              <label style="font-size:11px;color:var(--muted);font-weight:600;">Severity</label>
-              <select class="input w-full" id="finding-severity" style="padding:4px 8px;">
-                <option value="critical">Critical</option>
-                <option value="high" selected>High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-                <option value="info">Info</option>
-              </select>
+
+      <div class="fe-body">
+        <div class="fe-form" id="finding-editor-form">
+
+          <div class="fe-section">
+            <div class="fe-section-title">Identification</div>
+            ${feField('Title', 'finding-title', f.title, 'e.g. SQL injection in the login module', { required: true })}
+            <div class="fe-grid-2">
+              ${feSelect('Severity', 'finding-severity', FINDING_SEVERITIES, (f.severity || 'high'))}
+              ${feSelect('Status', 'finding-status', FINDING_STATUSES, (f.status || 'open'))}
             </div>
-            <div style="grid-column:1/3;">
-              <label style="font-size:11px;color:var(--muted);font-weight:600;">Category (Area of Assessment)</label>
-              <select class="input w-full" id="finding-category" style="padding:4px 8px;">
-                ${REPORT_AREAS.map(a => `<option value="${a.code}">${a.label}</option>`).join('')}
-              </select>
-            </div>
-            <div>
-              <label style="font-size:11px;color:var(--muted);font-weight:600;">Status</label>
-              <select class="input w-full" id="finding-status" style="padding:4px 8px;">
-                <option value="draft">Draft</option>
-                <option value="open" selected>Open</option>
-                <option value="in_progress">In Progress</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:11px;color:var(--muted);font-weight:600;">CVSS Score</label>
-              <input type="number" class="input w-full" id="finding-cvss" value="8.5" step="0.1" style="padding:4px 8px;">
-            </div>
-            <div>
-              <label style="font-size:11px;color:var(--muted);font-weight:600;">CVE</label>
-              <input class="input w-full" id="finding-cve" placeholder="CVE-YYYY-NNNNN" style="padding:4px 8px;">
+            ${feSelect('Area of Assessment', 'finding-category',
+                       REPORT_AREAS.map(a => ({ value: a.code, label: `${a.label} (${a.code})` })), area,
+                       'Decides the report section, the vulnerability id and the bar this finding counts towards in the findings-by-area chart.')}
+          </div>
+
+          <div class="fe-section">
+            <div class="fe-section-title">The vulnerability</div>
+            ${feTextarea('Description', 'finding-description', f.description,
+                         'What the weakness is and where it was found.', 5)}
+            ${feTextarea('Impact', 'finding-impact', f.impact,
+                         'What it lets an attacker do, in business terms.', 4)}
+          </div>
+
+          <div class="fe-section">
+            <div class="fe-section-title">Rating &amp; target</div>
+            ${feField('Affected System', 'finding-affected', f.affected_system || f.node_id,
+                      'e.g. portal.example.com  /  10.0.4.12 (445)',
+                      { mono: true, hint: 'Printed as the affected host in the report and on the deck&rsquo;s scenario slide.' })}
+            ${feField('CVSS v3.1 Vector', 'finding-cvss-vector', f.cvss_vector,
+                      'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', { mono: true })}
+            <div class="fe-grid-2">
+              ${feField('CVSS Score', 'finding-cvss', f.cvss_score, '0.0 - 10.0', { type: 'number', step: '0.1' })}
+              ${feField('CVE', 'finding-cve', f.cve, 'CVE-YYYY-NNNNN', { mono: true })}
             </div>
           </div>
+
+          <div class="fe-section">
+            <div class="fe-section-title">Proof of concept</div>
+            <div class="fe-field">
+              <label for="finding-poc">Steps and proof</label>
+              <textarea class="input w-full" id="finding-poc" rows="7"
+                        placeholder="Request, response, commands - whatever proves it. Screenshots attached below are appended here."
+                        style="resize:vertical;font-family:var(--font-mono);font-size:12px;line-height:1.6;">${sanitizeInput(f.poc || '')}</textarea>
+              <div class="flex items-center gap-2" style="margin-top:8px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('poc-image-input').click()">&#8593; Upload screenshot</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="showEvidencePickerForPoc()">&#128206; From Evidence vault</button>
+                <span class="fe-hint" style="margin:0;">A finding only gets a scenario slide in the closing deck if it has a screenshot.</span>
+              </div>
+              <input type="file" id="poc-image-input" accept="image/*" style="display:none;" onchange="insertPocImage(this)">
+              <div id="finding-poc-evidence" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
+              <input type="hidden" id="finding-evidence-ids" value="${(f.evidence_ids || []).join(',')}">
+            </div>
+          </div>
+
+          <div class="fe-section">
+            <div class="fe-section-title">Recommendation</div>
+            ${feTextarea('How to fix it', 'finding-recommendation', f.remediation,
+                         'The remediation the client is asked to carry out.', 4)}
+          </div>
         </div>
-        <div class="editor-preview" id="markdown-preview">
-          <h1>SQL Injection in Login Module</h1>
-          <h2>Description</h2>
-          <p>The authentication endpoint is vulnerable to SQL injection...</p>
-        </div>
-        <div style="padding:12px 24px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;background:var(--surface);">
-          <button class="btn btn-secondary" onclick="MCOLLABORATOR.navigate('#/ledger/project')">Discard</button>
-          <button class="btn btn-primary" onclick="saveFindingFromEditor()">Publish to Ledger</button>
+
+        <div class="fe-preview-pane">
+          <div class="fe-preview-head">
+            <span class="text-xs font-mono text-muted">Live preview</span>
+            <span class="text-xs text-muted">how this reads in the report</span>
+          </div>
+          <div class="fe-preview" id="finding-preview"></div>
         </div>
       </div>
     </div>
   `;
+}
+
+// feValue reads one editor field, trimmed. Everything the preview shows comes
+// through here so an empty field and a whitespace-only one look the same.
+function feValue(id) {
+  const el = document.getElementById(id);
+  return el ? (el.value || '').trim() : '';
+}
+
+// updateFindingPreview redraws the right-hand pane from the form as it stands.
+// It is called on every input and change event in the form, so an edit is
+// visible as it is made rather than only after a save.
+function updateFindingPreview() {
+  const host = document.getElementById('finding-preview');
+  if (!host) return;
+
+  const title = feValue('finding-title');
+  const severity = feValue('finding-severity') || 'info';
+  const areaCode = feValue('finding-category');
+  const area = REPORT_AREAS.find(a => a.code === areaCode);
+  const score = feValue('finding-cvss');
+  const vector = feValue('finding-cvss-vector');
+  const cve = feValue('finding-cve');
+  const affected = feValue('finding-affected');
+  const status = feValue('finding-status');
+
+  // An empty section is shown as a grey "nothing here yet" line rather than
+  // dropped, so the preview doubles as a checklist of what is still missing.
+  const block = (heading, text) => `
+    <div class="fe-pv-block">
+      <h3>${heading}</h3>
+      ${text
+        ? `<p>${sanitizeInput(text).replace(/\n/g, '<br>')}</p>`
+        : '<p class="fe-pv-empty">Not written yet.</p>'}
+    </div>`;
+
+  const severityLabel = (FINDING_SEVERITIES.find(x => x.value === severity) || { label: severity }).label;
+
+  host.innerHTML = `
+    <div class="fe-pv-head">
+      <div class="flex items-center gap-2 mb-2" style="flex-wrap:wrap;">
+        <span class="badge-severity ${severity}">${sanitizeInput(severityLabel)}</span>
+        ${area ? `<span class="badge-severity info" title="${sanitizeInput(area.label)}">${sanitizeInput(area.code)}</span>` : ''}
+        ${status ? `<span class="status-pill ${sanitizeInput(status)}" style="height:20px;font-size:10px;">${sanitizeInput(status.replace('_', ' '))}</span>` : ''}
+      </div>
+      <h1>${sanitizeInput(title) || '<span class="fe-pv-empty">Untitled finding</span>'}</h1>
+      <dl class="fe-pv-meta">
+        <div><dt>Affected</dt><dd>${sanitizeInput(affected) || '<span class="fe-pv-empty">not set</span>'}</dd></div>
+        <div><dt>CVSS</dt><dd>${sanitizeInput(score) || '<span class="fe-pv-empty">not set</span>'}${cve ? ' &middot; ' + sanitizeInput(cve) : ''}</dd></div>
+      </dl>
+      ${vector ? `<code class="fe-pv-vector">${sanitizeInput(vector)}</code>` : ''}
+    </div>
+    ${block('Description', feValue('finding-description'))}
+    ${block('Impact', feValue('finding-impact'))}
+    <div class="fe-pv-block">
+      <h3>Proof of Concept</h3>
+      <div class="fe-pv-poc" id="fe-pv-poc"></div>
+    </div>
+    ${block('Recommendation', feValue('finding-recommendation'))}
+  `;
+
+  // The PoC carries the <img> tags that attaching evidence inserts, so it is the
+  // one field rendered as markup - exactly as the finding detail page renders
+  // it, and exactly as it reaches the report.
+  const poc = document.getElementById('fe-pv-poc');
+  const pocText = feValue('finding-poc');
+  if (poc) {
+    poc.innerHTML = pocText
+      ? pocText
+      : '<p class="fe-pv-empty">No proof attached yet - a finding without a screenshot gets no scenario slide in the closing deck.</p>';
+  }
+
+  const topbar = document.getElementById('fe-topbar-title');
+  if (topbar) topbar.textContent = title || 'Untitled finding';
 }
 
 // Save the finding editor form to the current engagement via the API.
@@ -689,6 +833,9 @@ async function saveFindingFromEditor() {
     // decides its section, its vulnerability id and its bar in the
     // findings-by-area chart when the report is generated.
     category: document.getElementById('finding-category')?.value || '',
+    // The host or endpoint the finding was proved on. It prints as the affected
+    // host on the deck's scenario slide, so it has to be stored, not just typed.
+    affected_system: document.getElementById('finding-affected')?.value || '',
     status: document.getElementById('finding-status')?.value || 'open',
     poc: document.getElementById('finding-poc')?.value || '',
     remediation: document.getElementById('finding-recommendation')?.value || '',
@@ -818,34 +965,82 @@ function emptyReportWizardState() {
     findingAreas: {},       // finding id -> area code
     accountsExisting: [{ account: '', credentials: '' }],
     accountsCreated: [{ account: '', credentials: '' }],
-    odSync: false, odFolder: '', format: 'docx'
+    odSync: false, odFolder: '', format: 'docx',
+    // The last successful /reports/export and /reports/closure responses, kept
+    // so the download buttons are still there after a trip to another tab.
+    lastResult: null, lastClosureResult: null
   };
 }
 
+// The wizard draft lives for as long as the app is open, not for as long as the
+// Reports tab is on screen. Leaving for Closure Prep - which reads this very
+// state to describe the deck - or for the Evidence vault to attach a screenshot
+// and coming back used to drop everything that had been typed and restart at
+// step 1. Nothing is cleared now except by startReportWizardOver().
 let reportWizardState = emptyReportWizardState();
 
-function renderReportGenerator() {
+// hasReportWizardDraft is true once anything has been entered, and decides
+// whether the "Start over" button is worth showing.
+function hasReportWizardDraft() {
+  const s = reportWizardState;
+  const typed = ['companyName', 'companyInitials', 'refNumber', 'reportDate', 'assessmentStart',
+                 'assessmentEnd', 'testerName', 'approverName', 'approverTitle', 'outOfScope', 'tools', 'logo']
+    .some(k => (s[k] || '').trim() !== '');
+  return s.step > 1 || typed || Object.keys(s.areas).length > 0 || s.findings.length > 0;
+}
+
+function startReportWizardOver() {
+  if (hasReportWizardDraft() && !confirm('Clear everything entered in the wizard and start a new report?')) return;
   reportWizardState = emptyReportWizardState();
+  generatedReportFiles.docx = generatedReportFiles.pdf = generatedReportFiles.pptx = '';
+  MCOLLABORATOR.render();
+  showToast('Wizard cleared', 'info');
+}
+
+function renderReportGenerator() {
   const steps = [];
   for (let s = 1; s <= REPORT_WIZARD_STEPS; s++) {
+    const on = s <= reportWizardState.step;
     steps.push(`
-      <div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;
-        background:${s === 1 ? 'var(--primary)' : 'var(--surface-hover)'};color:${s === 1 ? 'var(--bg)' : 'var(--muted)'};"
+      <div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;cursor:pointer;
+        background:${on ? 'var(--primary)' : 'var(--surface-hover)'};color:${on ? 'var(--bg)' : 'var(--muted)'};"
+        title="Go to step ${s}" onclick="goToReportWizardStep(${s})"
         id="wizard-step-${s}">${s}</div>
       ${s < REPORT_WIZARD_STEPS ? '<div style="width:20px;height:2px;background:var(--border);"></div>' : ''}
     `);
   }
+  const draft = hasReportWizardDraft();
   return `
     <div style="max-width:960px;margin:0 auto;">
-      <div class="flex items-center justify-between mb-6">
+      <div class="flex items-center justify-between mb-2">
         <h2 class="font-display font-bold" style="font-size:22px;">Report Generation Wizard</h2>
         <div class="flex items-center gap-2">${steps.join('')}</div>
       </div>
+      <div class="flex items-center justify-between mb-6" style="min-height:24px;">
+        <span class="text-xs text-muted">
+          ${draft
+            ? '&#9679; Draft kept &mdash; you can leave this tab and come back without losing anything.'
+            : 'Fill in the five steps; the report and the closing deck are both built from what you enter here.'}
+        </span>
+        ${draft ? '<button class="btn btn-ghost btn-sm" onclick="startReportWizardOver()">Start over</button>' : ''}
+      </div>
       <div class="card" style="padding:32px;" id="report-wizard-content">
-        ${renderReportStep1()}
+        ${renderReportWizardStepHtml()}
       </div>
     </div>
   `;
+}
+
+// goToReportWizardStep jumps straight to a numbered bubble. Step 2 still gates
+// the ones after it: without an area there is nothing for findings to be
+// reported under.
+function goToReportWizardStep(step) {
+  if (step > 2 && selectedAreaCodes().length === 0) {
+    showToast('Select at least one assessment area first', 'error');
+    return;
+  }
+  reportWizardState.step = step;
+  renderReportWizardStep();
 }
 
 function wizardField(label, id, stateKey, placeholder) {
@@ -1101,10 +1296,11 @@ function renderReportStep5() {
         </div>
       </div>
       <div id="report-preview" style="border:1px solid var(--border);border-radius:var(--radius);padding:32px;background:var(--bg);min-height:200px;">
+        ${reportWizardState.lastResult ? reportResultHtml(reportWizardState.lastResult) : `
         <div style="text-align:center;color:var(--muted);padding:40px 0;">
           <div style="font-size:32px;margin-bottom:8px;">📋</div>
           <p>Click "Generate Report" to create your document.</p>
-        </div>
+        </div>`}
       </div>
     </div>
     <div style="display:flex;justify-content:space-between;margin-top:24px;">
@@ -1133,11 +1329,18 @@ function reportWizardBack() {
   renderReportWizardStep();
 }
 
+// renderReportWizardStepHtml is the current step's markup. Rendering the page
+// goes through it too, so returning to the Reports tab lands on the step that
+// was open rather than back at step 1.
+function renderReportWizardStepHtml() {
+  const stepFns = { 1: renderReportStep1, 2: renderReportStep2, 3: renderReportStep3, 4: renderReportStep4, 5: renderReportStep5 };
+  return (stepFns[reportWizardState.step] || renderReportStep1)();
+}
+
 function renderReportWizardStep() {
   const container = document.getElementById('report-wizard-content');
   if (!container) return;
-  const stepFns = { 1: renderReportStep1, 2: renderReportStep2, 3: renderReportStep3, 4: renderReportStep4, 5: renderReportStep5 };
-  container.innerHTML = stepFns[reportWizardState.step]();
+  container.innerHTML = renderReportWizardStepHtml();
   for (let s = 1; s <= REPORT_WIZARD_STEPS; s++) {
     const el = document.getElementById(`wizard-step-${s}`);
     if (el) {
@@ -1145,6 +1348,12 @@ function renderReportWizardStep() {
       el.style.color = s <= reportWizardState.step ? 'var(--bg)' : 'var(--muted)';
     }
   }
+  afterRenderReportWizardStep();
+}
+
+// Step 3's list is fetched, so it has to be asked for again every time the step
+// is drawn - including the draw that happens when the tab is re-entered.
+function afterRenderReportWizardStep() {
   if (reportWizardState.step === 3) loadWizardFindings();
 }
 
@@ -1334,6 +1543,98 @@ function reportWizardPayload() {
   };
 }
 
+// reportResultHtml renders one /reports/export response into the result panel.
+//
+// It is a function rather than inline markup because the panel has to be
+// redrawn from the stored response whenever the Reports tab is re-entered:
+// generating a report and then stepping over to Closure Prep used to leave the
+// DOCX and PDF unreachable, with nothing on screen saying the report existed.
+function reportResultHtml(data) {
+  const docxUrl = data?.docx_url;
+  const pdfUrl = data?.pdf_url;
+  const pdfError = data?.pdf_error;
+  const unmatched = data?.unmatched_findings || [];
+  const logoError = data?.logo_error;
+  const odStatus = data?.od_status;
+  const odDocxLink = data?.od_docx_link;
+  const odPdfLink = data?.od_pdf_link;
+  const odFolder = data?.od_folder;
+  const odError = data?.od_error;
+  const odRequested = data?.od_requested;
+
+  let buttons = '';
+  if (docxUrl) buttons += reportFileButtons('docx', docxUrl, '&#128196;', 'DOCX');
+  if (pdfUrl) buttons += reportFileButtons('pdf', pdfUrl, '&#128213;', 'PDF');
+
+  // A PDF is only offered when a real Word or LibreOffice layout engine
+  // produced it. Anything less would not be the template.
+  const pdfBlock = pdfError ? `
+    <div class="text-sm" style="margin-top:16px;color:var(--warning);">
+      &#9888; The DOCX is ready, but no PDF was produced: ${sanitizeInput(pdfError)}<br>
+      <span class="text-xs">Install Microsoft Word or LibreOffice on the server, or export the DOCX to PDF yourself.</span>
+    </div>` : '';
+
+  // A logo that was uploaded but could not be embedded used to be logged on
+  // the server and dropped, which looks exactly like never uploading one.
+  const logoBlock = logoError ? `
+    <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
+      &#9888; The client logo could not be added to the page header: ${sanitizeInput(logoError)}<br>
+      <span class="text-xs">The report is complete otherwise. Re-upload the logo as a PNG or JPG and generate again.</span>
+    </div>` : '';
+
+  // Every test-type row a finding could not be tied to reads Pass. That is
+  // the intended default, but a finding matching nothing at all means the
+  // vulnerability register and the checklist disagree, so say which ones.
+  const unmatchedBlock = unmatched.length ? `
+    <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
+      &#9888; ${unmatched.length} finding${unmatched.length === 1 ? '' : 's'} could not be matched to a test in their area's checklist,
+      so those rows read <strong>Pass</strong>:
+      <ul style="margin:6px 0 0 18px;">${unmatched.map(f => `<li>${sanitizeInput(f)}</li>`).join('')}</ul>
+      <span class="text-xs">Reword the finding title to name the test, or set the row by hand in the DOCX.</span>
+    </div>` : '';
+
+  // The sync reports three outcomes: filed, refused because the server has
+  // no OneDrive credentials, or attempted and failed. A partial upload -
+  // DOCX in, PDF not - comes back as "ok" carrying the reason the PDF
+  // is missing, so say both halves rather than claiming a clean sync.
+  let odBlock = '';
+  if (odRequested) {
+    if (odStatus === 'ok') {
+      const links = [
+        odDocxLink ? `<a href="${odDocxLink}" target="_blank" style="color:var(--primary);">DOCX</a>` : '',
+        odPdfLink ? `<a href="${odPdfLink}" target="_blank" style="color:var(--primary);">PDF</a>` : ''
+      ].filter(Boolean).join(' &middot; ');
+      odBlock = `
+        <div class="text-sm" style="margin-top:16px;color:#22C55E;">
+          &#9729; Filed in OneDrive under <strong>${sanitizeInput(odFolder || '')}</strong>${links ? ' — open ' + links : ''}
+        </div>
+        ${odError ? `<div class="text-xs" style="margin-top:6px;color:var(--warning);">&#9888; ${sanitizeInput(odError)}</div>` : ''}`;
+    } else if (odStatus === 'failed') {
+      odBlock = `
+        <div class="text-sm" style="margin-top:16px;color:var(--critical);">
+          &#9888; OneDrive sync failed: ${sanitizeInput(odError || 'unknown error')}
+        </div>`;
+    } else {
+      odBlock = `
+        <div class="text-sm" style="margin-top:16px;color:var(--warning);">
+          &#9888; ${sanitizeInput(odError || 'OneDrive is not set up on the server.')}
+        </div>`;
+    }
+  }
+
+  return `
+    <div style="text-align:center;padding:40px 0;">
+      <div style="font-size:32px;margin-bottom:8px;">${pdfError ? '⚠️' : '✅'}</div>
+      <p class="font-semibold mb-4">${pdfError ? 'Report generated (DOCX only)' : 'Report generated successfully!'}</p>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">${buttons}</div>
+      ${pdfBlock}
+      ${unmatchedBlock}
+      ${logoBlock}
+      ${odBlock}
+    </div>
+  `;
+}
+
 async function generateReportDocument() {
   showToast('Compiling report document...', 'info');
   const btn = document.querySelector('[onclick="generateReportDocument()"]');
@@ -1342,91 +1643,15 @@ async function generateReportDocument() {
     const payload = reportWizardPayload();
 
     const res = await api.post('/reports/export', payload);
-    const docxUrl = res.data?.docx_url;
-    const pdfUrl = res.data?.pdf_url;
-    const pdfError = res.data?.pdf_error;
-    const unmatched = res.data?.unmatched_findings || [];
-    const logoError = res.data?.logo_error;
-    const odStatus = res.data?.od_status;
-    const odDocxLink = res.data?.od_docx_link;
-    const odPdfLink = res.data?.od_pdf_link;
-    const odFolder = res.data?.od_folder;
-    const odError = res.data?.od_error;
+    // od_requested records whether this run asked for a sync, so the panel says
+    // the same thing when it is redrawn after the checkbox has been touched.
+    const data = Object.assign({}, res.data, { od_requested: reportWizardState.odSync });
+    reportWizardState.lastResult = data;
 
     const preview = document.getElementById('report-preview');
-    if (preview) {
-      let buttons = '';
-      if (docxUrl) buttons += reportFileButtons('docx', docxUrl, '&#128196;', 'DOCX');
-      if (pdfUrl) buttons += reportFileButtons('pdf', pdfUrl, '&#128213;', 'PDF');
+    if (preview) preview.innerHTML = reportResultHtml(data);
 
-      // A PDF is only offered when a real Word or LibreOffice layout engine
-      // produced it. Anything less would not be the template.
-      const pdfBlock = pdfError ? `
-        <div class="text-sm" style="margin-top:16px;color:var(--warning);">
-          ⚠️ The DOCX is ready, but no PDF was produced: ${sanitizeInput(pdfError)}<br>
-          <span class="text-xs">Install Microsoft Word or LibreOffice on the server, or export the DOCX to PDF yourself.</span>
-        </div>` : '';
-
-      // A logo that was uploaded but could not be embedded used to be logged on
-      // the server and dropped, which looks exactly like never uploading one.
-      const logoBlock = logoError ? `
-        <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
-          &#9888; The client logo could not be added to the page header: ${sanitizeInput(logoError)}<br>
-          <span class="text-xs">The report is complete otherwise. Re-upload the logo as a PNG or JPG and generate again.</span>
-        </div>` : '';
-
-      // Every test-type row a finding could not be tied to reads Pass. That is
-      // the intended default, but a finding matching nothing at all means the
-      // vulnerability register and the checklist disagree, so say which ones.
-      const unmatchedBlock = unmatched.length ? `
-        <div class="text-sm" style="margin-top:16px;color:var(--warning);text-align:left;">
-          &#9888; ${unmatched.length} finding${unmatched.length === 1 ? '' : 's'} could not be matched to a test in their area's checklist,
-          so those rows read <strong>Pass</strong>:
-          <ul style="margin:6px 0 0 18px;">${unmatched.map(f => `<li>${sanitizeInput(f)}</li>`).join('')}</ul>
-          <span class="text-xs">Reword the finding title to name the test, or set the row by hand in the DOCX.</span>
-        </div>` : '';
-
-      // The sync reports three outcomes: filed, refused because the server has
-      // no OneDrive credentials, or attempted and failed. A partial upload -
-      // DOCX in, PDF not - comes back as "ok" carrying the reason the PDF
-      // is missing, so say both halves rather than claiming a clean sync.
-      let odBlock = '';
-      if (reportWizardState.odSync) {
-        if (odStatus === 'ok') {
-          const links = [
-            odDocxLink ? `<a href="${odDocxLink}" target="_blank" style="color:var(--primary);">DOCX</a>` : '',
-            odPdfLink ? `<a href="${odPdfLink}" target="_blank" style="color:var(--primary);">PDF</a>` : ''
-          ].filter(Boolean).join(' · ');
-          odBlock = `
-            <div class="text-sm" style="margin-top:16px;color:#22C55E;">
-              ☁️ Filed in OneDrive under <strong>${sanitizeInput(odFolder || '')}</strong>${links ? ' — open ' + links : ''}
-            </div>
-            ${odError ? `<div class="text-xs" style="margin-top:6px;color:var(--warning);">⚠️ ${sanitizeInput(odError)}</div>` : ''}`;
-        } else if (odStatus === 'failed') {
-          odBlock = `
-            <div class="text-sm" style="margin-top:16px;color:var(--critical);">
-              ⚠️ OneDrive sync failed: ${sanitizeInput(odError || 'unknown error')}
-            </div>`;
-        } else {
-          odBlock = `
-            <div class="text-sm" style="margin-top:16px;color:var(--warning);">
-              ⚠️ ${sanitizeInput(odError || 'OneDrive is not set up on the server.')}
-            </div>`;
-        }
-      }
-
-      preview.innerHTML = `
-        <div style="text-align:center;padding:40px 0;">
-          <div style="font-size:32px;margin-bottom:8px;">${pdfError ? '⚠️' : '✅'}</div>
-          <p class="font-semibold mb-4">${pdfError ? 'Report generated (DOCX only)' : 'Report generated successfully!'}</p>
-          <div style="display:flex;gap:12px;justify-content:center;">${buttons}</div>
-          ${pdfBlock}
-          ${unmatchedBlock}
-          ${logoBlock}
-          ${odBlock}
-        </div>
-      `;
-    }
+    const pdfError = data?.pdf_error;
     showToast(pdfError ? 'DOCX ready — PDF could not be produced' : 'Report generated — DOCX and PDF ready',
               pdfError ? 'warning' : 'success');
   } catch (e) {
@@ -1509,6 +1734,10 @@ async function showFindingDetail(findingId) {
               <span class="text-sm text-muted">Found: ${timeAgo(f.created_at)}</span>
             </div>
             <h1 class="font-display font-bold" style="font-size:28px;">${f.title}</h1>
+            ${(f.affected_system || f.node_id) ? `<div class="flex items-center gap-2 mt-2">
+              <span class="text-sm text-muted">Affected:</span>
+              <code class="font-mono text-sm">${sanitizeInput(f.affected_system || f.node_id)}</code>
+            </div>` : ''}
             ${f.cvss_vector ? `<div class="flex items-center gap-2 mt-2" style="cursor:pointer;" onclick="navigator.clipboard.writeText('${f.cvss_vector}');showToast('Copied!','success')">
               <span class="text-sm text-muted">Vector:</span>
               <code class="font-mono text-sm" style="color:var(--primary);">${f.cvss_vector}</code>
@@ -1522,12 +1751,6 @@ async function showFindingDetail(findingId) {
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:16px;">
           ${canWriteFindings() ? `<button class="btn btn-secondary" onclick="MCOLLABORATOR.currentFinding=${JSON.stringify(f).replace(/"/g,'&quot;')};MCOLLABORATOR.navigate('#/finding-editor')">✏️ Edit Finding</button>` : ''}
           ${isAdmin() ? `<button class="btn btn-danger" onclick="deleteFinding('${f.id}')">Delete Finding</button>` : ''}
-        </div>
-        <div style="border-bottom:1px solid var(--border);margin-bottom:24px;">
-          <div class="flex gap-6">
-            <button class="tab-btn tab-btn-active" type="button">Evidence & Details</button>
-            <button class="tab-btn" type="button" onclick="showToast('Remediation tab','info')">Remediation</button>
-          </div>
         </div>
         <div class="mb-6">
           <h3 class="font-display font-bold mb-3">Description</h3>
@@ -2165,11 +2388,13 @@ function addPocEvidence(ev) {
   ta.value = ta.value + imgTag;
 
   renderPocEvidenceList();
+  if (typeof updateFindingPreview === 'function') updateFindingPreview();
 }
 
 function removePocEvidence(evId) {
   setPocEvidenceIds(getPocEvidenceIds().filter(id => id !== evId));
   renderPocEvidenceList();
+  if (typeof updateFindingPreview === 'function') updateFindingPreview();
 }
 
 // Render thumbnails of the currently attached PoC evidence.
@@ -2416,6 +2641,7 @@ function afterRender(path) {
       break;
     case path === '/reports':
     case path === '/report-generator':
+      setTimeout(afterRenderReportWizardStep, 50);
       break;
     case path === '/finding-editor':
       setTimeout(afterRenderFindingEditor, 50);
@@ -2423,39 +2649,24 @@ function afterRender(path) {
   }
 }
 
-// Pre-fill the finding editor from MCOLLABORATOR.currentFinding (if editing an
-// existing finding) and render any attached PoC evidence thumbnails.
+// The editor's fields are filled in by renderFindingEditor itself, so all that
+// is left here is to draw the attached evidence and wire the live preview.
+//
+// One delegated listener on the form covers every field, including ones added
+// later: a new input needs no handler of its own to appear in the preview.
 function afterRenderFindingEditor() {
+  const form = document.getElementById('finding-editor-form');
+  if (!form) return;
+
   const f = MCOLLABORATOR.currentFinding;
-  if (!f) return;
-  const set = (id, val) => {
-    const el = document.getElementById(id);
-    if (el && val) el.value = val;
-  };
-  set('finding-title', f.title);
-  set('finding-description', f.description);
-  set('finding-impact', f.impact);
-  set('finding-cvss-vector', f.cvss_vector);
-  set('finding-affected', f.affected_system || f.node_id);
-  set('finding-poc', f.poc);
-  set('finding-recommendation', f.remediation);
-  set('finding-cve', f.cve);
-  const sev = document.getElementById('finding-severity');
-  if (sev && f.severity) sev.value = f.severity;
-  const status = document.getElementById('finding-status');
-  if (status && f.status) status.value = f.status;
-  // Findings recorded before the category listed assessment areas carry a loose
-  // label ("web", "external"); map those onto the area they mean so the editor
-  // opens on something real rather than silently resetting to the first option.
-  const cat = document.getElementById('finding-category');
-  const catCode = normalizeAreaCode(f.category);
-  if (cat && catCode) cat.value = catCode;
-  const cvss = document.getElementById('finding-cvss');
-  if (cvss && f.cvss_score) cvss.value = f.cvss_score;
-  if (Array.isArray(f.evidence_ids) && f.evidence_ids.length) {
+  if (f && Array.isArray(f.evidence_ids) && f.evidence_ids.length) {
     setPocEvidenceIds(f.evidence_ids);
     renderPocEvidenceList();
   }
+
+  form.addEventListener('input', updateFindingPreview);
+  form.addEventListener('change', updateFindingPreview);
+  updateFindingPreview();
 }
 
 // Pulse animation for critical vulns

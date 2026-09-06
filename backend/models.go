@@ -89,22 +89,26 @@ type Finding struct {
 	// IPTC, WPT, CFG, ASA, ADT, WNA, NAR). It decides which chapter 3 section of
 	// the report the finding prints in and which bar of the findings-by-area
 	// chart it counts towards.
-	Category    string   `json:"category,omitempty"`
-	Severity    string   `json:"severity"`
-	CVSSVector  string   `json:"cvss_vector,omitempty"`
-	CVSSScore   float64  `json:"cvss_score"`
-	Status      string   `json:"status"`
-	Description string   `json:"description"`
-	POC         string   `json:"poc,omitempty"`
-	Remediation string   `json:"remediation,omitempty"`
-	Impact      string   `json:"impact,omitempty"`
-	Likelihood  string   `json:"likelihood,omitempty"`
-	AssignedTo  string   `json:"assigned_to,omitempty"`
-	EvidenceIDs []string `json:"evidence_ids,omitempty"` // evidence records attached as PoC screenshots
-	CreatedBy   string   `json:"created_by"`
-	Version     int      `json:"version"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	Category string `json:"category,omitempty"`
+	Severity string `json:"severity"`
+	// AffectedSystem is the host, URL or endpoint the finding was proved on. It
+	// prints as "Affected Host" in the closing deck and fills the affected
+	// column of the report, so the editor's value has to survive the round trip.
+	AffectedSystem string   `json:"affected_system,omitempty"`
+	CVSSVector     string   `json:"cvss_vector,omitempty"`
+	CVSSScore      float64  `json:"cvss_score"`
+	Status         string   `json:"status"`
+	Description    string   `json:"description"`
+	POC            string   `json:"poc,omitempty"`
+	Remediation    string   `json:"remediation,omitempty"`
+	Impact         string   `json:"impact,omitempty"`
+	Likelihood     string   `json:"likelihood,omitempty"`
+	AssignedTo     string   `json:"assigned_to,omitempty"`
+	EvidenceIDs    []string `json:"evidence_ids,omitempty"` // evidence records attached as PoC screenshots
+	CreatedBy      string   `json:"created_by"`
+	Version        int      `json:"version"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
 }
 
 type Evidence struct {

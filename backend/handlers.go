@@ -326,6 +326,7 @@ type createFindingInput struct {
 	MitreAttackIDs []string `json:"mitre_attack_ids,omitempty"`
 	Category       string   `json:"category,omitempty"`
 	Severity       string   `json:"severity"`
+	AffectedSystem string   `json:"affected_system,omitempty"`
 	CVSSVector     string   `json:"cvss_vector,omitempty"`
 	CVSSScore      float64  `json:"cvss_score"`
 	Status         string   `json:"status"`
@@ -373,7 +374,7 @@ func HandleCreateFinding(store *Store) http.HandlerFunc {
 		finding := &Finding{
 			EngagementID: engID, NodeID: input.NodeID, Title: input.Title,
 			CVE: input.CVE, CWEs: input.CWEs, MitreAttackIDs: input.MitreAttackIDs,
-			Category: input.Category,
+			Category: input.Category, AffectedSystem: input.AffectedSystem,
 			Severity: input.Severity, CVSSVector: input.CVSSVector, CVSSScore: input.CVSSScore,
 			Status: input.Status, Description: input.Description, POC: input.POC,
 			Remediation: input.Remediation, Impact: input.Impact, Likelihood: input.Likelihood,
@@ -406,6 +407,7 @@ func HandleUpdateFinding(store *Store) http.HandlerFunc {
 		finding.CWEs = input.CWEs
 		finding.MitreAttackIDs = input.MitreAttackIDs
 		finding.Category = input.Category
+		finding.AffectedSystem = input.AffectedSystem
 		finding.Severity = input.Severity
 		finding.CVSSVector = input.CVSSVector
 		finding.CVSSScore = input.CVSSScore
@@ -468,6 +470,7 @@ func HandleBulkCreateFindings(store *Store) http.HandlerFunc {
 			f := &Finding{
 				EngagementID: engID, NodeID: inp.NodeID, Title: inp.Title,
 				CVE: inp.CVE, CWEs: inp.CWEs, MitreAttackIDs: inp.MitreAttackIDs,
+				Category: inp.Category, AffectedSystem: inp.AffectedSystem,
 				Severity: inp.Severity, CVSSVector: inp.CVSSVector, CVSSScore: inp.CVSSScore,
 				Status: inp.Status, Description: inp.Description, POC: inp.POC,
 				Remediation: inp.Remediation, Impact: inp.Impact, Likelihood: inp.Likelihood,

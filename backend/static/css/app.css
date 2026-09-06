@@ -386,20 +386,80 @@ input, textarea, select, button { font-family: inherit; }
 .pane-right { width: 300px; border-left: 1px solid var(--border); flex-shrink: 0; }
 
 /* ============ FINDING EDITOR ============ */
-.editor-pane { display: flex; flex: 1; overflow: hidden; }
-.editor-left { width: 50%; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-.editor-right { width: 50%; display: flex; flex-direction: column; }
-.editor-textarea {
-  flex: 1; resize: none; border: none; outline: none; padding: 24px;
-  font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
-  background: var(--surface); color: var(--text);
+/* Form on the left, live preview on the right, one action bar across the top.
+   The two panes scroll independently so a long PoC never pushes the preview
+   out of reach. */
+.finding-editor {
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--topbar-height));
+  overflow: hidden;
 }
-.editor-preview { flex: 1; padding: 24px; overflow-y: auto; background: var(--surface); }
-.editor-preview h1 { font-family: var(--font-display); font-size: 24px; margin-bottom: 16px; }
-.editor-preview h2 { font-family: var(--font-display); font-size: 20px; margin-bottom: 12px; }
-.editor-preview p { margin-bottom: 12px; line-height: 1.6; }
-.editor-preview code { background: var(--bg); padding: 2px 6px; border-radius: 2px; font-family: var(--font-mono); font-size: 12px; }
-.editor-preview pre { background: var(--bg); padding: 16px; border-radius: var(--radius); overflow-x: auto; margin-bottom: 16px; }
+.fe-topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 20px; background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.fe-body { display: flex; flex: 1; overflow: hidden; }
+.fe-form {
+  width: 52%; flex-shrink: 0; overflow-y: auto;
+  padding: 20px 24px 48px; background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+.fe-preview-pane { flex: 1; display: flex; flex-direction: column; background: var(--surface); min-width: 0; }
+.fe-preview-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+
+.fe-section { margin-bottom: 26px; }
+.fe-section-title {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted);
+  padding-bottom: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border);
+}
+.fe-field { margin-bottom: 14px; }
+.fe-field > label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; }
+.fe-field .input { width: 100%; }
+.fe-hint { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+.fe-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* The preview mirrors the report's vulnerability entry: heading, rating,
+   then the same four sections in the same order. */
+.fe-preview { flex: 1; overflow-y: auto; padding: 24px 28px 56px; }
+.fe-pv-head { padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.fe-pv-head h1 { font-family: var(--font-display); font-size: 21px; line-height: 1.3; margin-bottom: 12px; }
+.fe-pv-meta { display: flex; flex-wrap: wrap; gap: 24px; }
+.fe-pv-meta dt {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); margin-bottom: 2px;
+}
+.fe-pv-meta dd { font-size: 13px; font-family: var(--font-mono); word-break: break-word; }
+.fe-pv-vector {
+  display: inline-block; margin-top: 12px; padding: 4px 8px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--font-mono); font-size: 11px; color: var(--primary); word-break: break-all;
+}
+.fe-pv-block { margin-bottom: 22px; }
+.fe-pv-block h3 {
+  font-family: var(--font-display); font-size: 14px; margin-bottom: 8px;
+  text-transform: uppercase; letter-spacing: 0.5px; color: var(--primary);
+}
+.fe-pv-block p { font-size: 13px; line-height: 1.75; color: var(--text); }
+.fe-pv-empty { color: var(--muted); font-style: italic; }
+.fe-pv-poc {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7;
+  white-space: pre-wrap; word-break: break-word; overflow-x: auto;
+}
+.fe-pv-poc img { max-width: 100%; height: auto; border-radius: 4px; margin: 8px 0; display: block; }
+.fe-pv-poc .fe-pv-empty { font-family: var(--font-body); white-space: normal; }
+
+/* One column once the preview would be too narrow to read. */
+@media (max-width: 1100px) {
+  .fe-body { flex-direction: column; overflow-y: auto; }
+  .fe-form { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+  .fe-preview-pane { width: 100%; }
+}
 
 /* Inline section tabs (finding detail) */
 .tab-btn {
