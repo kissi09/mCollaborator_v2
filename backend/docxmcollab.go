@@ -898,9 +898,144 @@ func normalizeDetailTemplate(detail, areaCode string, lib detailRowLibrary) stri
 		detail = relabelDetailRow(detail, "affected", "Affected Endpoint")
 	}
 
+	// A finding is one table. Two of them cannot be made to touch - Word always
+	// leaves a gap between tables - so a section that split its finding in half
+	// showed a band of white between the description and the fields under it
+	// whatever was done to the paragraphs in between.
+	detail = mergeFindingTables(detail)
+
 	detail = rewriteDetailTables(detail, lib)
-	return dropEmptyBlockParagraphs(detail)
+	detail = dropEmptyBlockParagraphs(detail)
+	return styleVulnerabilityHeading(detail)
 }
+
+// mergeFindingTables folds a finding split across two tables into one, taking
+// the second table's rows into the first and widening them to its grid.
+func mergeFindingTables(detail string) string {
+	for {
+		merged, ok := mergeFirstTablePair(detail)
+		if !ok {
+			return detail
+		}
+		detail = merged
+	}
+}
+
+func mergeFirstTablePair(detail string) (string, bool) {
+	wrapped := "<w:body>" + detail + "</w:body>"
+	children := bodyChildren(wrapped)
+
+	isFindingTable := func(el string) bool {
+		return tableHasLabel(el, "description") || tableHasLabel(el, "affected") ||
+			tableHasLabel(el, "recommendation")
+	}
+
+	for i, c := range children {
+		if c.Tag != "w:tbl" || !isFindingTable(wrapped[c.Start:c.End]) {
+			continue
+		}
+		// The next thing that is not an empty paragraph.
+		j := i + 1
+		for j < len(children) && children[j].Tag == "w:p" &&
+			strings.TrimSpace(elemText(wrapped[children[j].Start:children[j].End])) == "" {
+			j++
+		}
+		if j >= len(children) || children[j].Tag != "w:tbl" {
+			continue
+		}
+		second := wrapped[children[j].Start:children[j].End]
+		if !isFindingTable(second) {
+			continue
+		}
+
+		first := wrapped[c.Start:c.End]
+		columns := tableColumns(first)
+		var rows strings.Builder
+		for _, r := range tableRows(second) {
+			rows.WriteString(setRowSpan(second[r.Start:r.End], columns))
+		}
+		close := strings.LastIndex(first, "</w:tbl>")
+		if close < 0 {
+			continue
+		}
+		combined := first[:close] + rows.String() + first[close:]
+
+		// Everything from the first table to the end of the second becomes the
+		// one table, which takes the paragraphs between them with it.
+		return wrapped[len("<w:body>"):c.Start] + combined +
+			wrapped[children[j].End:len(wrapped)-len("</w:body>")], true
+	}
+	return detail, false
+}
+
+// styleVulnerabilityHeading puts a finding's title in the same Heading style as
+// every other section's.
+//
+// Two of the blocks style theirs by hand instead - the same outline level and
+// numbering, but the colour and the weight written onto the paragraph rather
+// than taken from the style. Rewriting the title's runs then loses all of it and
+// the heading comes out black, next to the orange ones in every other section.
+func styleVulnerabilityHeading(detail string) string {
+	wrapped := "<w:body>" + detail + "</w:body>"
+	for _, c := range bodyChildren(wrapped) {
+		if c.Tag != "w:p" || !vulnHeadingRe.MatchString(c.Text) {
+			continue
+		}
+		if strings.Contains(c.Style, "Heading3") {
+			return detail
+		}
+		para := wrapped[c.Start:c.End]
+		out := setParaStyle(para, "Heading3")
+		return wrapped[len("<w:body>"):c.Start] + out +
+			wrapped[c.End:len(wrapped)-len("</w:body>")]
+	}
+	return detail
+}
+
+// setParaStyle gives a paragraph a named style and drops the direct formatting
+// that would otherwise fight it - the numbering the style already applies, and
+// the colour and weight it is meant to supply.
+func setParaStyle(para, style string) string {
+	pPr := paraPPr(para)
+	inner := ""
+	if pPr != "" {
+		inner = strings.TrimSuffix(strings.TrimPrefix(pPr, "<w:pPr>"), "</w:pPr>")
+		inner = pStyleElemRe.ReplaceAllString(inner, "")
+		inner = numPrRe.ReplaceAllString(inner, "")
+		inner = outlineLvlRe.ReplaceAllString(inner, "")
+		inner = paraMarkRPrRe.ReplaceAllString(inner, "")
+	}
+	newPPr := `<w:pPr><w:pStyle w:val="` + style + `"/>` + inner + `</w:pPr>`
+
+	if pPr != "" {
+		i := strings.Index(para, pPr)
+		para = para[:i] + newPPr + para[i+len(pPr):]
+	} else if gt := strings.Index(para, ">"); gt >= 0 {
+		para = para[:gt+1] + newPPr + para[gt+1:]
+	}
+
+	// The runs take their colour and weight from the style, not from whatever
+	// was written onto them.
+	for _, r := range childElems(para, "w:r") {
+		run := para[r.Start:r.End]
+		rPr := firstElemOf(run, "w:rPr")
+		if rPr == "" {
+			continue
+		}
+		stripped := runColorRe.ReplaceAllString(rPr, "")
+		stripped = runBoldItalicRe.ReplaceAllString(stripped, "")
+		para = para[:r.Start] + replaceRunRPr(run, stripped) + para[r.End:]
+	}
+	return para
+}
+
+var (
+	pStyleElemRe    = regexp.MustCompile(`<w:pStyle[^>]*/>`)
+	numPrRe         = regexp.MustCompile(`(?s)<w:numPr>.*?</w:numPr>`)
+	outlineLvlRe    = regexp.MustCompile(`<w:outlineLvl[^>]*/>`)
+	paraMarkRPrRe   = regexp.MustCompile(`(?s)<w:rPr>.*?</w:rPr>`)
+	runBoldItalicRe = regexp.MustCompile(`<w:(b|bCs|i|iCs)( w:val="[^"]*")?/>`)
+)
 
 // rewriteDetailTables walks every finding table in a block and corrects the rows
 // in it.

@@ -253,6 +253,67 @@ func TestNoEmptyBandsInsideAFindingTable(t *testing.T) {
 	}
 }
 
+// A finding is one table. Two tables cannot be made to touch - Word always
+// leaves a gap between them - so a section that split its finding in half showed
+// a band of white between the description and the fields under it however the
+// paragraphs between were dealt with.
+func TestAFindingIsOneTable(t *testing.T) {
+	doc := readDocxParts(t, rowsConfig())["word/document.xml"]
+	for _, title := range []string{
+		"Flat network with no segmentation",
+		"SMB signing not required",
+		"Kerberoastable service account",
+	} {
+		if n := len(renderedFindingTables(t, doc, title)); n != 1 {
+			t.Errorf("%s is printed as %d tables; a finding is one table", title, n)
+		}
+	}
+}
+
+// Every finding's title is styled the same way. Two of the blocks style theirs
+// by hand rather than through the Heading style, and rewriting the title's runs
+// then loses the formatting: the heading came out black beside the orange ones
+// in every other section.
+func TestEveryFindingTitleUsesTheSameHeadingStyle(t *testing.T) {
+	doc := readDocxParts(t, rowsConfig())["word/document.xml"]
+	children := bodyChildren(doc)
+
+	styles := map[string][]string{}
+	for _, title := range []string{
+		"SMB signing not required",
+		"Weak TLS ciphers",
+		"Reflected XSS",
+		"Default SNMP community string",
+		"Kerberoastable service account",
+		"Flat network with no segmentation",
+	} {
+		found := false
+		for _, c := range children {
+			if c.Tag != "w:p" || strings.TrimSpace(elemText(doc[c.Start:c.End])) != title {
+				continue
+			}
+			styles[c.Style] = append(styles[c.Style], title)
+			found = true
+			break
+		}
+		if !found {
+			t.Errorf("%q was not found", title)
+		}
+	}
+
+	if len(styles) != 1 {
+		for style, titles := range styles {
+			t.Errorf("style %q: %v", style, titles)
+		}
+		t.Fatal("finding titles are not all in the same style")
+	}
+	for style := range styles {
+		if !strings.Contains(style, "Heading") {
+			t.Errorf("finding titles use %q, which is not a Heading style - they would not reach the navigation pane", style)
+		}
+	}
+}
+
 // Active Directory findings are reported by endpoint, and never had an attack
 // vector to print.
 func TestActiveDirectoryDropsTheAttackVector(t *testing.T) {
