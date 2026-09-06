@@ -12,6 +12,8 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -39,10 +41,36 @@ func singleAreaConfig(t *testing.T) ReportConfig {
 }
 
 // issueCellOf returns one cell of the first issues table's first data row.
+// slideNamesInOrder lists the deck's slide parts in the order they are numbered.
+// Sorting the names as strings would put slide10 before slide2.
+func slideNamesInOrder(parts map[string]string) []string {
+	var names []string
+	for name := range parts {
+		if strings.HasPrefix(name, "ppt/slides/slide") && strings.HasSuffix(name, ".xml") {
+			names = append(names, name)
+		}
+	}
+	sort.SliceStable(names, func(i, j int) bool { return slideNumber(names[i]) < slideNumber(names[j]) })
+	return names
+}
+
+func slideNumber(name string) int {
+	digits := strings.TrimSuffix(strings.TrimPrefix(name, "ppt/slides/slide"), ".xml")
+	n, err := strconv.Atoi(digits)
+	if err != nil {
+		return 1 << 30
+	}
+	return n
+}
+
 func issueCellOf(t *testing.T, parts map[string]string, cell int) string {
 	t.Helper()
-	for name, body := range parts {
-		if !strings.HasPrefix(name, "ppt/slides/slide") || !strings.Contains(body, ">Issues<") {
+	// In deck order. Ranging over the parts map returned whichever issues slide
+	// Go handed back first, so this asserted against a different slide from run
+	// to run - it passed or failed on the map's iteration order, not the deck's.
+	for _, name := range slideNamesInOrder(parts) {
+		body := parts[name]
+		if !strings.Contains(body, ">Issues<") {
 			continue
 		}
 		start := strings.Index(body, "<a:tbl>")
