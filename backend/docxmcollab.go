@@ -681,6 +681,10 @@ func renderFindingDetail(tmpl string, f numberedFinding, config ReportConfig, po
 
 	pocXML := pocs.drawingsFor(f.ReportFinding)
 
+	// Sections whose layout carries no Impact row get one, and IPT and EPT get
+	// a proof-of-concept row when this finding has proof to put in it.
+	s = ensureFindingRows(s, values["poc"] != "" || pocXML != "")
+
 	// Fill every detail table in the block.
 	var out strings.Builder
 	prev := 0
@@ -692,6 +696,144 @@ func renderFindingDetail(tmpl string, f numberedFinding, config ReportConfig, po
 	}
 	out.WriteString(s[prev:])
 	return out.String(), nil
+}
+
+// ---------------------------------------------------------------------------
+// rows the template does not ship
+// ---------------------------------------------------------------------------
+
+// Three of the eight section layouts print an Impact row and five do not, and
+// only four print a proof of concept. Neither gap is deliberate: an internal
+// finding has a business impact exactly as an external one does, and an internal
+// or external finding is as worth proving with a screenshot as a web one.
+//
+// Rather than editing the template - which is the client's own document and the
+// thing every other rule here is measured against - the missing rows are added
+// to the finding's own table as it is rendered, cloned from a row pair that is
+// already in it so the new rows carry that section's grid, shading and margins.
+//
+// Impact is added wherever it is missing, because a finding always has one.
+// The proof of concept is added only when the finding actually has proof: a
+// section that never shipped the row should not start printing an empty one.
+
+// ensureFindingRows adds the Impact and PoC row pairs a section's detail table
+// does not carry.
+func ensureFindingRows(s string, wantPOC bool) string {
+	tables := childElems(s, "w:tbl")
+	if len(tables) == 0 {
+		return s
+	}
+
+	blockHas := func(label string) bool {
+		for _, t := range tables {
+			if tableHasLabel(s[t.Start:t.End], label) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// The finding's rows end in the table holding the Recommendation, and every
+	// layout keeps its labelled rows there - including NAR, which splits the
+	// description off into a table of its own.
+	anchor := -1
+	for i, t := range tables {
+		if tableHasLabel(s[t.Start:t.End], "recommendation") {
+			anchor = i
+		}
+	}
+	if anchor < 0 {
+		return s
+	}
+
+	tbl := s[tables[anchor].Start:tables[anchor].End]
+	if !blockHas("impact") {
+		tbl = insertDetailPair(tbl, "Impact", "")
+	}
+	if wantPOC && !blockHas("poc") {
+		tbl = insertDetailPair(tbl, "PoC", "recommendation")
+	}
+	return s[:tables[anchor].Start] + tbl + s[tables[anchor].End:]
+}
+
+// tableHasLabel reports whether a table carries a label cell for a detail field.
+func tableHasLabel(tbl, key string) bool {
+	for _, r := range tableRows(tbl) {
+		row := tbl[r.Start:r.End]
+		for _, c := range rowCells(row) {
+			label := strings.ToLower(strings.TrimSpace(elemText(row[c.Start:c.End])))
+			if detailLabels[label] == key {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// insertDetailPair clones a label/value row pair already in the table, relabels
+// it, and inserts it before the pair whose label maps to beforeKey - or, when
+// that is blank, before the first simple pair, which is where the template puts
+// the rows that follow the description.
+func insertDetailPair(tbl, label, beforeKey string) string {
+	rows := tableRows(tbl)
+
+	// A pair worth cloning is a full-width label over a full-width value. The
+	// recommendation's is not: its value row carries the naming line. Nor is
+	// one whose value row is split into columns, as IPT's affected hosts is.
+	rowLabel := func(ri int) string {
+		row := tbl[rows[ri].Start:rows[ri].End]
+		cells := rowCells(row)
+		if len(cells) != 1 {
+			return ""
+		}
+		return strings.ToLower(strings.TrimSpace(elemText(row[cells[0].Start:cells[0].End])))
+	}
+
+	proto := -1
+	for ri := 0; ri+1 < len(rows); ri++ {
+		key := detailLabels[rowLabel(ri)]
+		if key == "" || key == "recommendation" {
+			continue
+		}
+		if len(rowCells(tbl[rows[ri+1].Start:rows[ri+1].End])) != 1 {
+			continue
+		}
+		proto = ri
+		break
+	}
+	if proto < 0 {
+		return tbl
+	}
+
+	at := proto
+	if beforeKey != "" {
+		at = -1
+		for ri := 0; ri+1 < len(rows); ri++ {
+			if detailLabels[rowLabel(ri)] == beforeKey {
+				at = ri
+				break
+			}
+		}
+		if at < 0 {
+			return tbl
+		}
+	}
+
+	labelRow := setRowFirstCell(tbl[rows[proto].Start:rows[proto].End], label)
+	valueRow := setRowFirstCell(tbl[rows[proto+1].Start:rows[proto+1].End], "")
+
+	return tbl[:rows[at].Start] + labelRow + valueRow + tbl[rows[at].Start:]
+}
+
+// setRowFirstCell replaces the text of a row's first cell, keeping the cell's
+// own formatting - which is what makes the clone look like the rows around it.
+func setRowFirstCell(row, text string) string {
+	cells := rowCells(row)
+	if len(cells) == 0 {
+		return row
+	}
+	cell := setCellLines(row[cells[0].Start:cells[0].End], []string{text})
+	return row[:cells[0].Start] + cell + row[cells[0].End:]
 }
 
 // detailAttackVector prefers an explicit attack vector and otherwise reads the

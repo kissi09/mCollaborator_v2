@@ -582,29 +582,41 @@ async function markEngagementCompleted(engId) {
 // anything left untouched was published as if it had been written - so the
 // fields start empty now and the example lives in the placeholders instead.
 
-// AREA_LAYOUTS is what each area's block in the Word template actually prints.
-// The eight blocks do not agree: a configuration review prints a description, a
-// rating, the affected device and a recommendation and nothing else, while a web
-// application finding also carries a CVSS vector, an impact and a proof of
-// concept. Asking for a CVSS vector on a config finding produces a field that
-// goes nowhere, and not asking for the attack vector on an Active Directory
-// finding leaves the template's own row to be guessed at.
+// AREA_LAYOUTS is the row list each area's finding prints, in order.
+//
+// The eight blocks in the Word template do not agree with one another: a
+// configuration review carries Description, Rating, Affected Device and
+// Recommendation and nothing else, while a web application finding also carries
+// a CVSS vector, an impact and a proof of concept. Two of those differences are
+// not deliberate, and the renderer closes them rather than the template being
+// edited - see ensureFindingRows in docxmcollab.go:
+//
+//   - Impact prints in every section. A finding has a business impact wherever
+//     it was found, so it is asked for everywhere and always printed.
+//   - IPT and EPT print a proof of concept when the finding has one. The row is
+//     added only where there is proof to put in it, so a section that never
+//     shipped one does not start printing an empty row.
+//
+// 'affected' is the row the template labels differently in every section -
+// Affected Hosts, Affected Device, Affected Domain, Affected SSIDs. Description,
+// Rating and Recommendation are in every layout and are not listed.
 //
 // Pinned on the Go side by TestSectionLayoutsCarryTheirOwnLabels, which reads
-// the labels out of the template itself. If that test fails, this table is what
-// has to change with it.
+// the template's own labels, and by TestAddedRowsKeepTheTemplateOrder, which
+// checks the order a rendered finding comes out in. If either fails, this table
+// is what has to change with it.
 const AREA_LAYOUTS = {
-  IPT:  { affected: 'Affected Hosts',       rows: ['cvss', 'attackVector'] },
-  EPT:  { affected: 'Affected Host',        rows: ['impact', 'cvss'] },
-  IPTC: { affected: 'Affected Host',        rows: ['cvss', 'impact', 'poc'] },
-  WPT:  { affected: 'Affected Application', rows: ['cvss', 'impact', 'poc'] },
-  CFG:  { affected: 'Affected Device',      rows: [] },
+  IPT:  { affected: 'Affected Hosts',       order: ['impact', 'cvss', 'attackVector', 'affected', 'poc'], pocWhenAttached: true },
+  EPT:  { affected: 'Affected Host',        order: ['impact', 'cvss', 'affected', 'poc'], pocWhenAttached: true },
+  IPTC: { affected: 'Affected Host',        order: ['cvss', 'impact', 'affected', 'poc'] },
+  WPT:  { affected: 'Affected Application', order: ['cvss', 'impact', 'affected', 'poc'] },
+  CFG:  { affected: 'Affected Device',      order: ['impact', 'affected'] },
   // The template ships no API Security Assessment block, so the report prints
   // API findings under the web application layout.
-  ASA:  { affected: 'Affected Application', rows: ['cvss', 'impact', 'poc'], borrowedFrom: 'Web Application Penetration Testing' },
-  ADT:  { affected: 'Affected Domain',      rows: ['attackVector', 'poc'] },
-  WNA:  { affected: 'Affected SSIDs',       rows: ['attackVector', 'poc'] },
-  NAR:  { affected: 'Affected Network',     rows: [] }
+  ASA:  { affected: 'Affected Application', order: ['cvss', 'impact', 'affected', 'poc'], borrowedFrom: 'Web Application Penetration Testing' },
+  ADT:  { affected: 'Affected Domain',      order: ['impact', 'attackVector', 'affected', 'poc'] },
+  WNA:  { affected: 'Affected SSIDs',       order: ['impact', 'attackVector', 'affected', 'poc'] },
+  NAR:  { affected: 'Affected Network',     order: ['impact', 'affected'] }
 };
 
 function areaLayout(code) {
@@ -612,7 +624,23 @@ function areaLayout(code) {
 }
 
 function layoutHas(code, row) {
-  return areaLayout(code).rows.indexOf(row) !== -1;
+  return areaLayout(code).order.indexOf(row) !== -1;
+}
+
+// printedRows names the rows the report prints for an area, in order, for the
+// note under the area picker.
+function printedRows(code) {
+  const layout = areaLayout(code);
+  const names = {
+    impact: 'Impact',
+    cvss: 'CVSS Vector',
+    attackVector: 'Attack Vector',
+    affected: layout.affected,
+    poc: layout.pocWhenAttached ? 'PoC (when attached)' : 'PoC'
+  };
+  return ['Description', 'Rating']
+    .concat(layout.order.map(r => names[r]))
+    .concat(['Recommendation']);
 }
 
 const FINDING_SEVERITIES = [
@@ -775,13 +803,7 @@ function renderFindingFields() {
   const area = REPORT_AREAS.find(a => a.code === s.area);
   const areaName = area ? area.label : s.area;
 
-  const printed = ['Description', 'Rating']
-    .concat(layout.rows.indexOf('impact') !== -1 ? ['Impact'] : [])
-    .concat(layout.rows.indexOf('cvss') !== -1 ? ['CVSS Vector'] : [])
-    .concat(layout.rows.indexOf('attackVector') !== -1 ? ['Attack Vector'] : [])
-    .concat([layout.affected])
-    .concat(layout.rows.indexOf('poc') !== -1 ? ['PoC'] : [])
-    .concat(['Recommendation']);
+  const printed = printedRows(s.area);
 
   return `
     <div class="fe-section">
@@ -841,7 +863,9 @@ function renderFindingFields() {
         <div class="flex items-center gap-2" style="margin-top:8px;flex-wrap:wrap;">
           <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('poc-image-input').click()">&#8593; Upload screenshot</button>
           <button type="button" class="btn btn-secondary btn-sm" onclick="showEvidencePickerForPoc()">&#128206; From Evidence vault</button>
-          <span class="fe-hint" style="margin:0;">A finding only gets a scenario slide in the closing deck if it has a screenshot.</span>
+          <span class="fe-hint" style="margin:0;">${layout.pocWhenAttached
+            ? 'Optional. This section prints a proof-of-concept row only for findings that have one.'
+            : 'A finding only gets a scenario slide in the closing deck if it has a screenshot.'}</span>
         </div>
         <input type="file" id="poc-image-input" accept="image/*" style="display:none;" onchange="insertPocImage(this)">
         <div id="finding-poc-evidence" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
