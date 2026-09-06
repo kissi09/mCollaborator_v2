@@ -522,6 +522,7 @@ func renderAreaSections(doc string, config ReportConfig, findings []numberedFind
 	if err != nil {
 		return doc, err
 	}
+	lib := buildDetailRowLibrary(templates)
 
 	byArea := map[string][]numberedFinding{}
 	for _, f := range findings {
@@ -553,8 +554,9 @@ func renderAreaSections(doc string, config ReportConfig, findings []numberedFind
 			b.WriteString(noFindingsParagraph(area))
 			continue
 		}
+		detail := normalizeDetailTemplate(tmpl.Detail, code, lib)
 		for _, f := range list {
-			unit, err := renderFindingDetail(tmpl.Detail, f, config, pocs)
+			unit, err := renderFindingDetail(detail, f, config, pocs, lib)
 			if err != nil {
 				return doc, err
 			}
@@ -616,11 +618,14 @@ var detailLabels = map[string]string{
 	"affected host":        "affected",
 	"affected application": "affected",
 	"affected device":      "affected",
-	"affected domain":      "affected",
-	"affected network":     "affected",
-	"affected ssids":       "affected",
-	"poc":                  "poc",
-	"recommendation":       "recommendation",
+	// Active Directory findings are reported by endpoint; the row is relabelled
+	// as the section renders, and it has to still be recognised afterwards.
+	"affected endpoint": "affected",
+	"affected domain":   "affected",
+	"affected network":  "affected",
+	"affected ssids":    "affected",
+	"poc":               "poc",
+	"recommendation":    "recommendation",
 }
 
 var recLineRe = regexp.MustCompile(`\[Company Initials\]\s*_\s*REC\s*\[[Nn]umber\]\s*_\s*[A-Z]+\s*\d+\s*[^\[]*\[Recommendation Header\]`)
@@ -651,7 +656,7 @@ func rewriteParagraphs(s string, decide func(text string) (string, bool)) string
 // renderFindingDetail produces one finding's block: the vulnerability heading,
 // the detail table(s) with every labelled cell filled, and the recommendation
 // line rewritten to this finding's vulnerability id.
-func renderFindingDetail(tmpl string, f numberedFinding, config ReportConfig, pocs *pocCollector) (string, error) {
+func renderFindingDetail(tmpl string, f numberedFinding, config ReportConfig, pocs *pocCollector, lib detailRowLibrary) (string, error) {
 	// The vulnerability heading and the recommendation naming line are rebuilt
 	// whole: both are stitched together from several differently formatted runs
 	// in the template, and both are entirely replaced by this finding's own
@@ -683,7 +688,7 @@ func renderFindingDetail(tmpl string, f numberedFinding, config ReportConfig, po
 
 	// Sections whose layout carries no Impact row get one, and IPT and EPT get
 	// a proof-of-concept row when this finding has proof to put in it.
-	s = ensureFindingRows(s, values["poc"] != "" || pocXML != "")
+	s = ensureFindingRows(s, lib, values["poc"] != "" || pocXML != "")
 
 	// Fill every detail table in the block.
 	var out strings.Builder
@@ -696,6 +701,371 @@ func renderFindingDetail(tmpl string, f numberedFinding, config ReportConfig, po
 	}
 	out.WriteString(s[prev:])
 	return out.String(), nil
+}
+
+// ---------------------------------------------------------------------------
+// correcting a section's layout as it renders
+// ---------------------------------------------------------------------------
+//
+// The eight blocks in chapter 3 were built by hand over time and they have
+// drifted: one splits its affected-hosts box into five columns nothing fills,
+// two set a fixed height on the description box that leaves an inch of white
+// under two lines of text, one prints its labels in black on the orange fill,
+// one heads its recommendation in a different typeface at a different size, and
+// several carry empty paragraphs - some of them heading-styled, which puts blank
+// entries in the reader's navigation pane.
+//
+// None of that is fixed in the template. The template is the client's own
+// document and every other rule here is measured against it, so the corrections
+// are applied to the block as it is rendered, from one place that says what each
+// one is for.
+
+// detailRowLibrary holds real row pairs lifted from the sections that ship them,
+// so a row added to a section that does not gets that section's own formatting
+// rather than a clone of whatever pair happened to sit first in its table.
+type detailRowLibrary struct {
+	impactLabel, impactValue string
+	pocLabel, pocValue       string
+}
+
+// buildDetailRowLibrary reads the pairs out of the web application block, which
+// is the one section carrying every row the others are missing.
+func buildDetailRowLibrary(templates map[string]areaTemplate) detailRowLibrary {
+	var lib detailRowLibrary
+	src, ok := templates["WPT"]
+	if !ok {
+		return lib
+	}
+	for _, t := range childElems(src.Detail, "w:tbl") {
+		tbl := src.Detail[t.Start:t.End]
+		if l, v, ok := detailRowPair(tbl, "impact"); ok {
+			lib.impactLabel, lib.impactValue = l, v
+		}
+		if l, v, ok := detailRowPair(tbl, "poc"); ok {
+			lib.pocLabel, lib.pocValue = l, v
+		}
+	}
+	return lib
+}
+
+// detailRowPair returns the label row and the value row under it for one field.
+func detailRowPair(tbl, key string) (string, string, bool) {
+	rows := tableRows(tbl)
+	for ri := 0; ri+1 < len(rows); ri++ {
+		row := tbl[rows[ri].Start:rows[ri].End]
+		cells := rowCells(row)
+		if len(cells) != 1 {
+			continue
+		}
+		label := strings.ToLower(strings.TrimSpace(elemText(row[cells[0].Start:cells[0].End])))
+		if detailLabels[label] != key {
+			continue
+		}
+		return row, tbl[rows[ri+1].Start:rows[ri+1].End], true
+	}
+	return "", "", false
+}
+
+// tableColumns is how many grid columns a table has, read off its widest row.
+func tableColumns(tbl string) int {
+	widest := 1
+	for _, r := range tableRows(tbl) {
+		row := tbl[r.Start:r.End]
+		n := 0
+		for _, c := range rowCells(row) {
+			cell := row[c.Start:c.End]
+			span := 1
+			if m := gridSpanValRe.FindStringSubmatch(cell); m != nil {
+				if v, err := strconv.Atoi(m[1]); err == nil && v > 0 {
+					span = v
+				}
+			}
+			n += span
+		}
+		if n > widest {
+			widest = n
+		}
+	}
+	return widest
+}
+
+var gridSpanValRe = regexp.MustCompile(`<w:gridSpan w:val="(\d+)"/>`)
+
+// trHeightRe is a row's fixed height. On a value row it is a floor, not a fit:
+// the description box stays an inch and a half tall however little is in it.
+var trHeightRe = regexp.MustCompile(`<w:trHeight[^>]*/>`)
+
+// stripRowHeight lets a row be as tall as what is written in it.
+func stripRowHeight(row string) string { return trHeightRe.ReplaceAllString(row, "") }
+
+// collapseRowToOneCell rewrites a row split into columns as a single cell across
+// the table. The affected-hosts box of the internal block is divided into five
+// and only ever holds one list of addresses.
+func collapseRowToOneCell(row string, columns int) string {
+	cells := rowCells(row)
+	if len(cells) <= 1 {
+		return row
+	}
+	first := cellGridSpan(row[cells[0].Start:cells[0].End], columns)
+	return row[:cells[0].Start] + first + row[cells[len(cells)-1].End:]
+}
+
+// setRowSpan makes a borrowed row fit the table it is being put into.
+func setRowSpan(row string, columns int) string {
+	cells := rowCells(row)
+	if len(cells) != 1 {
+		return row
+	}
+	cell := cellGridSpan(row[cells[0].Start:cells[0].End], columns)
+	return row[:cells[0].Start] + cell + row[cells[0].End:]
+}
+
+// normalizeLabelRow makes a row read like every other label: white, and in no
+// typeface or size of its own.
+func normalizeLabelRow(row string) string {
+	cells := rowCells(row)
+	var b strings.Builder
+	prev := 0
+	for _, c := range cells {
+		b.WriteString(row[prev:c.Start])
+		b.WriteString(whitenCell(stripSizeAndFont(row[c.Start:c.End])))
+		prev = c.End
+	}
+	if prev == 0 {
+		return row
+	}
+	b.WriteString(row[prev:])
+	return b.String()
+}
+
+// whitenCell prints a label cell's text white. Every label sits on the orange
+// fill, but two of the blocks never said so and came out black on orange.
+func whitenCell(cell string) string {
+	for _, p := range childElems(cell, "w:p") {
+		para := cell[p.Start:p.End]
+		var b strings.Builder
+		prev := 0
+		for _, r := range childElems(para, "w:r") {
+			run := para[r.Start:r.End]
+			rPr := firstElemOf(run, "w:rPr")
+			b.WriteString(para[prev:r.Start])
+			b.WriteString(replaceRunRPr(run, withRunColor(rPr, "FFFFFF")))
+			prev = r.End
+		}
+		if prev == 0 {
+			continue
+		}
+		b.WriteString(para[prev:])
+		cell = cell[:p.Start] + b.String() + cell[p.End:]
+	}
+	return cell
+}
+
+func firstElemOf(s, tag string) string {
+	els := childElems(s, tag)
+	if len(els) == 0 {
+		return ""
+	}
+	return s[els[0].Start:els[0].End]
+}
+
+func replaceRunRPr(run, rPr string) string {
+	els := childElems(run, "w:rPr")
+	if len(els) == 0 {
+		gt := strings.Index(run, ">")
+		if gt < 0 {
+			return run
+		}
+		return run[:gt+1] + rPr + run[gt+1:]
+	}
+	return run[:els[0].Start] + rPr + run[els[0].End:]
+}
+
+// sizeAndFontRe are the overrides that made one section's Recommendation
+// heading a different typeface at a different size from every other label.
+var sizeAndFontRe = regexp.MustCompile(`<w:(sz|szCs) w:val="[^"]*"/>|<w:rFonts[^>]*w:ascii="[^"]*"[^>]*/>`)
+
+func stripSizeAndFont(cell string) string { return sizeAndFontRe.ReplaceAllString(cell, "") }
+
+// normalizeDetailTemplate applies every correction that is the same for all of a
+// section's findings. It runs once per area rather than once per finding.
+func normalizeDetailTemplate(detail, areaCode string, lib detailRowLibrary) string {
+	// Rows this section should not print at all.
+	if areaCode == "ADT" {
+		// Active Directory findings are reported by endpoint, and the attack
+		// vector row was never filled - it left an empty labelled box.
+		detail = removeDetailRow(detail, "attackvector")
+		detail = relabelDetailRow(detail, "affected", "Affected Endpoint")
+	}
+
+	detail = rewriteDetailTables(detail, lib)
+	return dropEmptyBlockParagraphs(detail)
+}
+
+// rewriteDetailTables walks every finding table in a block and corrects the rows
+// in it.
+func rewriteDetailTables(detail string, lib detailRowLibrary) string {
+	var out strings.Builder
+	prev := 0
+	for _, t := range childElems(detail, "w:tbl") {
+		tbl := detail[t.Start:t.End]
+		if !tableHasLabel(tbl, "description") && !tableHasLabel(tbl, "affected") {
+			continue
+		}
+		out.WriteString(detail[prev:t.Start])
+		out.WriteString(fixDetailTable(tbl))
+		prev = t.End
+	}
+	if prev == 0 {
+		return detail
+	}
+	out.WriteString(detail[prev:])
+	return out.String()
+}
+
+func fixDetailTable(tbl string) string {
+	columns := tableColumns(tbl)
+	rows := tableRows(tbl)
+
+	// Back to front so the offsets stay valid.
+	for ri := len(rows) - 1; ri >= 0; ri-- {
+		row := tbl[rows[ri].Start:rows[ri].End]
+		cells := rowCells(row)
+		isLabel := false
+		if len(cells) >= 1 {
+			for _, c := range cells {
+				label := strings.ToLower(strings.TrimSpace(elemText(row[c.Start:c.End])))
+				if _, ok := detailLabels[label]; ok {
+					isLabel = true
+					break
+				}
+			}
+		}
+
+		if isLabel {
+			// Every label sits on the orange fill, so every label is white, and
+			// none of them carries a size or typeface of its own.
+			var b strings.Builder
+			p := 0
+			for _, c := range cells {
+				b.WriteString(row[p:c.Start])
+				b.WriteString(whitenCell(stripSizeAndFont(row[c.Start:c.End])))
+				p = c.End
+			}
+			b.WriteString(row[p:])
+			row = b.String()
+		} else {
+			// A value row is as tall as what is written in it, and is one box
+			// rather than a set of columns nothing fills.
+			row = stripRowHeight(row)
+			if len(cells) > 1 && ri > 0 {
+				above := rowCells(tbl[rows[ri-1].Start:rows[ri-1].End])
+				if len(above) == 1 {
+					row = collapseRowToOneCell(row, columns)
+				}
+			}
+		}
+		tbl = tbl[:rows[ri].Start] + row + tbl[rows[ri].End:]
+	}
+	return tbl
+}
+
+// removeDetailRow takes a labelled row and the value row under it out of the
+// block, leaving nothing behind - an empty labelled box reads as a field
+// somebody forgot to fill.
+func removeDetailRow(detail, key string) string {
+	for _, t := range childElems(detail, "w:tbl") {
+		tbl := detail[t.Start:t.End]
+		rows := tableRows(tbl)
+		for ri := 0; ri+1 < len(rows); ri++ {
+			row := tbl[rows[ri].Start:rows[ri].End]
+			cells := rowCells(row)
+			if len(cells) != 1 {
+				continue
+			}
+			label := strings.ToLower(strings.TrimSpace(elemText(row[cells[0].Start:cells[0].End])))
+			if detailLabels[label] != key {
+				continue
+			}
+			cut := tbl[:rows[ri].Start] + tbl[rows[ri+1].End:]
+			return detail[:t.Start] + cut + detail[t.End:]
+		}
+	}
+	return detail
+}
+
+// relabelDetailRow renames a labelled row, keeping its formatting.
+func relabelDetailRow(detail, key, name string) string {
+	for _, t := range childElems(detail, "w:tbl") {
+		tbl := detail[t.Start:t.End]
+		rows := tableRows(tbl)
+		for ri := range rows {
+			row := tbl[rows[ri].Start:rows[ri].End]
+			cells := rowCells(row)
+			if len(cells) != 1 {
+				continue
+			}
+			cell := row[cells[0].Start:cells[0].End]
+			label := strings.ToLower(strings.TrimSpace(elemText(cell)))
+			if detailLabels[label] != key {
+				continue
+			}
+			row = row[:cells[0].Start] + setCellLines(cell, []string{name}) + row[cells[0].End:]
+			tbl = tbl[:rows[ri].Start] + row + tbl[rows[ri].End:]
+			return detail[:t.Start] + tbl + detail[t.End:]
+		}
+	}
+	return detail
+}
+
+// dropEmptyBlockParagraphs removes the empty paragraphs that do not belong.
+//
+// Two kinds. An empty paragraph between two tables of the same finding opens a
+// gap in the middle of it - the description of a network architecture finding
+// sat an inch above its own impact. And an empty paragraph in a Heading style
+// puts a blank line in the reader's navigation pane. The single blank line that
+// separates one finding from the next is spacing and stays.
+func dropEmptyBlockParagraphs(detail string) string {
+	wrapped := "<w:body>" + detail + "</w:body>"
+	children := bodyChildren(wrapped)
+
+	lastTable := -1
+	for i, c := range children {
+		if c.Tag == "w:tbl" {
+			lastTable = i
+		}
+	}
+
+	var b strings.Builder
+	seenTable := false
+	trailingBlank := false
+	for i, c := range children {
+		el := wrapped[c.Start:c.End]
+		if c.Tag == "w:tbl" {
+			seenTable = true
+			trailingBlank = false
+			b.WriteString(el)
+			continue
+		}
+		if c.Tag != "w:p" || strings.TrimSpace(elemText(el)) != "" {
+			trailingBlank = false
+			b.WriteString(el)
+			continue
+		}
+		// Empty from here down.
+		if isHeading(c.Style) {
+			continue // a blank line in the navigation pane
+		}
+		if seenTable && i < lastTable {
+			continue // it splits one finding in two
+		}
+		if trailingBlank {
+			continue // one blank line after the finding, not two
+		}
+		trailingBlank = true
+		b.WriteString(el)
+	}
+	return b.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -716,9 +1086,12 @@ func renderFindingDetail(tmpl string, f numberedFinding, config ReportConfig, po
 // The proof of concept is added only when the finding actually has proof: a
 // section that never shipped the row should not start printing an empty one.
 
-// ensureFindingRows adds the Impact and PoC row pairs a section's detail table
-// does not carry.
-func ensureFindingRows(s string, wantPOC bool) string {
+// ensureFindingRows adds the Impact and PoC row pairs a section's table does not
+// carry, taking them from a section that does so they arrive with that row's own
+// formatting. A locally cloned pair inherits whatever pair happened to sit first
+// in the table, which is how the internal block's proof of concept came out
+// looking nothing like the web application block's.
+func ensureFindingRows(s string, lib detailRowLibrary, wantPOC bool) string {
 	tables := childElems(s, "w:tbl")
 	if len(tables) == 0 {
 		return s
@@ -748,38 +1121,25 @@ func ensureFindingRows(s string, wantPOC bool) string {
 
 	tbl := s[tables[anchor].Start:tables[anchor].End]
 	if !blockHas("impact") {
-		tbl = insertDetailPair(tbl, "Impact", "")
+		tbl = insertDetailPair(tbl, "Impact", "", lib.impactLabel, lib.impactValue)
 	}
 	if wantPOC && !blockHas("poc") {
-		tbl = insertDetailPair(tbl, "PoC", "recommendation")
+		tbl = insertDetailPair(tbl, "PoC", "recommendation", lib.pocLabel, lib.pocValue)
 	}
 	return s[:tables[anchor].Start] + tbl + s[tables[anchor].End:]
 }
 
-// tableHasLabel reports whether a table carries a label cell for a detail field.
-func tableHasLabel(tbl, key string) bool {
-	for _, r := range tableRows(tbl) {
-		row := tbl[r.Start:r.End]
-		for _, c := range rowCells(row) {
-			label := strings.ToLower(strings.TrimSpace(elemText(row[c.Start:c.End])))
-			if detailLabels[label] == key {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// insertDetailPair clones a label/value row pair already in the table, relabels
-// it, and inserts it before the pair whose label maps to beforeKey - or, when
-// that is blank, before the first simple pair, which is where the template puts
-// the rows that follow the description.
-func insertDetailPair(tbl, label, beforeKey string) string {
+// insertDetailPair puts a label/value row pair into a table, before the pair
+// whose label maps to beforeKey - or, when that is blank, before the first
+// full-width pair, which is where the template puts the rows that follow the
+// description.
+//
+// The rows come from another section when one was supplied, resized to this
+// table's grid; otherwise a pair already in this table is cloned and relabelled.
+func insertDetailPair(tbl, label, beforeKey, borrowLabel, borrowValue string) string {
 	rows := tableRows(tbl)
+	columns := tableColumns(tbl)
 
-	// A pair worth cloning is a full-width label over a full-width value. The
-	// recommendation's is not: its value row carries the naming line. Nor is
-	// one whose value row is split into columns, as IPT's affected hosts is.
 	rowLabel := func(ri int) string {
 		row := tbl[rows[ri].Start:rows[ri].End]
 		cells := rowCells(row)
@@ -819,10 +1179,33 @@ func insertDetailPair(tbl, label, beforeKey string) string {
 		}
 	}
 
-	labelRow := setRowFirstCell(tbl[rows[proto].Start:rows[proto].End], label)
-	valueRow := setRowFirstCell(tbl[rows[proto+1].Start:rows[proto+1].End], "")
+	var labelRow, valueRow string
+	if borrowLabel != "" && borrowValue != "" {
+		labelRow = setRowFirstCell(setRowSpan(borrowLabel, columns), label)
+		valueRow = stripRowHeight(setRowSpan(borrowValue, columns))
+	} else {
+		labelRow = setRowFirstCell(tbl[rows[proto].Start:rows[proto].End], label)
+		valueRow = stripRowHeight(setRowFirstCell(tbl[rows[proto+1].Start:rows[proto+1].End], ""))
+	}
+	// A borrowed label took its white from the banding of the table it came
+	// from, which its new row does not sit in.
+	labelRow = normalizeLabelRow(labelRow)
 
 	return tbl[:rows[at].Start] + labelRow + valueRow + tbl[rows[at].Start:]
+}
+
+// tableHasLabel reports whether a table carries a label cell for a detail field.
+func tableHasLabel(tbl, key string) bool {
+	for _, r := range tableRows(tbl) {
+		row := tbl[r.Start:r.End]
+		for _, c := range rowCells(row) {
+			label := strings.ToLower(strings.TrimSpace(elemText(row[c.Start:c.End])))
+			if detailLabels[label] == key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // setRowFirstCell replaces the text of a row's first cell, keeping the cell's

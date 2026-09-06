@@ -563,6 +563,7 @@ var pdfLabels = []struct {
 	{"affected host", "affected"},
 	{"affected application", "affected"},
 	{"affected device", "affected"},
+	{"affected endpoint", "affected"},
 	{"affected domain", "affected"},
 	{"affected network", "affected"},
 	{"affected ssids", "affected"},
