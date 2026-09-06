@@ -338,6 +338,34 @@ function renderLedgerDashboard() {
 }
 
 // A project counts as completed once its status is closed/completed.
+// engagementProgress is how far through its own dates a project is. The bar it
+// feeds used to be Math.random(), which drew a different length every time the
+// dashboard rendered - a number on a card a manager reads to judge how a job is
+// going, and it meant nothing. A project with no dates gets no bar rather than
+// an invented one.
+function engagementProgress(e) {
+  const start = Date.parse(e.timeline?.start_date || '');
+  const end = Date.parse(e.timeline?.end_date || '');
+  if (isNaN(start) || isNaN(end) || end <= start) return null;
+
+  const day = 24 * 60 * 60 * 1000;
+  const total = Math.max(1, Math.round((end - start) / day));
+  const elapsed = Math.round((Date.now() - start) / day);
+
+  if (elapsed < 0) {
+    return { pct: 0, tone: 'var(--muted)', label: `Starts in ${-elapsed} day${elapsed === -1 ? '' : 's'}` };
+  }
+  if (elapsed > total) {
+    const over = elapsed - total;
+    return { pct: 100, tone: 'var(--critical)', label: `${over} day${over === 1 ? '' : 's'} past the end date` };
+  }
+  return {
+    pct: Math.round(Math.min(elapsed, total) / total * 100),
+    tone: 'var(--primary)',
+    label: `Day ${Math.max(1, elapsed)} of ${total}`
+  };
+}
+
 function isCompletedEngagement(e) {
   return e.status === 'closed' || e.status === 'completed';
 }
@@ -376,51 +404,58 @@ async function afterRenderLedgerDashboard() {
     document.getElementById('ledger-completed-count').textContent =
       `${completed.length} in the last 90 days`;
 
-    document.getElementById('ledger-project-list').innerHTML = active.length ? active.map(e => `
-      <a class="flex items-start gap-4 p-4 card mb-3" style="cursor:pointer;" onclick="MCOLLABORATOR.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
-        <div class="flex-1">
-          <div class="flex items-center gap-3 mb-1">
-            <h4 class="font-display font-bold" style="font-size:15px;">${e.name}</h4>
-            <span class="status-pill ${e.status}">${e.status.replace('_',' ')}</span>
+    document.getElementById('ledger-project-list').innerHTML = active.length ? active.map(e => {
+      const run = engagementProgress(e);
+      return `
+      <a class="project-card card" onclick="MCOLLABORATOR.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g, '&quot;')}})">
+        <div style="flex:1;min-width:0;">
+          <div class="flex items-center gap-3 mb-1" style="flex-wrap:wrap;">
+            <h4 class="font-display font-bold" style="font-size:15px;">${sanitizeInput(e.name || '')}</h4>
+            <span class="status-pill ${sanitizeInput(e.status || '')}">${sanitizeInput((e.status || '').replace('_', ' '))}</span>
           </div>
-          <p class="text-sm text-muted mb-3">Client: ${e.client_name || 'N/A'} | ${(e.scope?.included||[]).length} targets</p>
-          <div class="flex items-center gap-4">
-            <div class="flex-1" style="max-width:300px;">
-              <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
-                <div style="height:100%;width:${Math.floor(Math.random()*80+20)}%;background:var(--primary);"></div>
-              </div>
-            </div>
-          </div>
+          <p class="text-sm text-muted ${run ? 'mb-3' : ''}">
+            ${sanitizeInput(e.client_name || 'No client recorded')}
+            <span style="color:var(--border);margin:0 8px;">|</span>
+            ${(e.scope?.included || []).length} target${(e.scope?.included || []).length === 1 ? '' : 's'}
+          </p>
+          ${run ? `
+            <div style="max-width:340px;">
+              <div class="ws-meter"><span style="width:${run.pct}%;background:${run.tone};"></span></div>
+              <div class="text-xs text-muted mt-1">${sanitizeInput(run.label)}</div>
+            </div>` : ''}
         </div>
-        <span style="color:var(--muted);">→</span>
-      </a>
-    `).join('') : '<p class="text-sm text-muted">No active projects.</p>';
+        <span class="project-card-go">&rarr;</span>
+      </a>`;
+    }).join('') : '<p class="text-sm text-muted">No active projects.</p>';
 
     document.getElementById('ledger-completed-list').innerHTML = completed.length ? completed.map(e => `
-      <a class="flex items-start gap-4 p-4 card mb-3" style="cursor:pointer;opacity:0.85;" onclick="MCOLLABORATOR.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g,'&quot;')}})">
-        <div class="flex-1">
-          <div class="flex items-center gap-3 mb-1">
-            <h4 class="font-display font-bold" style="font-size:15px;">${e.name}</h4>
-            <span class="status-pill ${e.status}">${e.status.replace('_',' ')}</span>
+      <a class="project-card card is-done" onclick="MCOLLABORATOR.navigate('#/ledger/project',{engagement:${JSON.stringify(e).replace(/"/g, '&quot;')}})">
+        <div style="flex:1;min-width:0;">
+          <div class="flex items-center gap-3 mb-1" style="flex-wrap:wrap;">
+            <h4 class="font-display font-bold" style="font-size:15px;">${sanitizeInput(e.name || '')}</h4>
+            <span class="status-pill ${sanitizeInput(e.status || '')}">${sanitizeInput((e.status || '').replace('_', ' '))}</span>
           </div>
-          <p class="text-sm text-muted mb-3">Client: ${e.client_name || 'N/A'} | ${(e.scope?.included||[]).length} targets</p>
-          <div class="flex items-center gap-4">
-            <span class="text-xs text-muted font-mono">Completed ${timeAgo(engagementCompletedAt(e))}</span>
-          </div>
+          <p class="text-sm text-muted">
+            ${sanitizeInput(e.client_name || 'No client recorded')}
+            <span style="color:var(--border);margin:0 8px;">|</span>
+            ${(e.scope?.included || []).length} target${(e.scope?.included || []).length === 1 ? '' : 's'}
+            <span style="color:var(--border);margin:0 8px;">|</span>
+            <span class="font-mono text-xs">completed ${timeAgo(engagementCompletedAt(e))}</span>
+          </p>
         </div>
-        <span style="color:var(--muted);">→</span>
+        <span class="project-card-go">&rarr;</span>
       </a>
     `).join('') : '<p class="text-sm text-muted">No projects completed in the last 90 days.</p>';
 
-    document.getElementById('ledger-activity').innerHTML = activities.map(a => `
-      <div class="flex gap-3 mb-4" style="font-size:13px;">
+    document.getElementById('ledger-activity').innerHTML = activities.length ? activities.map(a => `
+      <div class="activity-row">
         <div style="width:6px;height:6px;border-radius:50%;background:var(--primary);margin-top:6px;flex-shrink:0;"></div>
-        <div>
-          <span class="font-semibold">${a.user_name}</span> ${a.detail || a.action}
-          <div class="text-xs text-muted">${timeAgo(a.created_at)}</div>
+        <div style="min-width:0;">
+          <span class="font-semibold">${sanitizeInput(a.user_name || '')}</span> ${sanitizeInput(a.detail || a.action || '')}
+          <div class="text-xs text-muted mt-1">${timeAgo(a.created_at)}</div>
         </div>
       </div>
-    `).join('');
+    `).join('') : '<p class="text-sm text-muted">Nothing yet.</p>';
   } catch (e) {
     document.getElementById('ledger-project-list').innerHTML = '<p class="text-muted">Failed to load projects.</p>';
     const done = document.getElementById('ledger-completed-list');
