@@ -13,8 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"bytes"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/ledongthuc/pdf"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -451,6 +453,121 @@ func HandleUpdateFindingStatus(store *Store) http.HandlerFunc {
 		store.AddAuditLog(&AuditLog{OrgID: user.OrgID, ActorID: user.ID, Action: "finding.status_change", Resource: "finding", ResourceID: finding.ID, IPAddress: r.RemoteAddr, Diff: fmt.Sprintf(`{"new_status": "%s", "reason": "%s"}`, input.Status, input.Reason)})
 		writeJSON(w, http.StatusOK, ApiResponse{Data: finding})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// reading findings out of a finished report
+// ---------------------------------------------------------------------------
+
+// extractMaxBytes is the largest report accepted. A VAPT report with its
+// screenshots runs to a few megabytes; 25 MB is generous and still bounded.
+const extractMaxBytes = 25 << 20
+
+// HandleExtractFindings reads a DOCX or PDF and returns the findings it can see,
+// each with the assessment area it belongs to and how that was decided.
+//
+// It saves nothing. The candidates go back to the reviewer, who corrects the
+// areas and then posts the set to the bulk endpoint - the one thing an extractor
+// cannot do reliably is decide the area when the document does not say, and a
+// wrong area filed silently is worse than one that asks.
+func HandleExtractFindings(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		engID := chi.URLParam(r, "id")
+		if _, err := store.GetEngagement(engID); err != nil {
+			writeJSON(w, http.StatusNotFound, ApiResponse{Error: &ApiError{Code: "NOT_FOUND", Message: "Engagement not found"}})
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, extractMaxBytes+(1<<20))
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{
+				Error: &ApiError{Code: "INVALID_REQUEST", Message: "The upload could not be read. Reports over 25 MB are rejected."}})
+			return
+		}
+
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_REQUEST", Message: "No file was uploaded"}})
+			return
+		}
+		defer file.Close()
+
+		name := filepath.Base(header.Filename)
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".docx" && ext != ".pdf" {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{
+				Error: &ApiError{Code: "UNSUPPORTED_TYPE", Message: "Only .docx and .pdf reports can be read. A .doc has to be saved as .docx first."}})
+			return
+		}
+
+		data, err := io.ReadAll(io.LimitReader(file, extractMaxBytes+1))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "INVALID_REQUEST", Message: "The file could not be read"}})
+			return
+		}
+		if len(data) > extractMaxBytes {
+			writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{Code: "TOO_LARGE", Message: "The report is larger than 25 MB"}})
+			return
+		}
+
+		var (
+			findings []ExtractedFinding
+			notes    []string
+			kind     string
+		)
+		switch ext {
+		case ".docx":
+			kind = "docx"
+			findings, notes, err = ExtractFromDOCX(data)
+		case ".pdf":
+			kind = "pdf"
+			var text string
+			text, err = pdfPlainText(data)
+			if err == nil {
+				findings, notes = ExtractFromPDFText(text)
+			}
+		}
+		if err != nil {
+			// The reason a document could not be read is the useful part: it
+			// tells the tester whether to try the DOCX instead or fix the file.
+			writeJSON(w, http.StatusUnprocessableEntity, ApiResponse{
+				Error: &ApiError{Code: "UNREADABLE_DOCUMENT", Message: err.Error()}})
+			return
+		}
+
+		result := BuildExtractResult(name, kind, findings, notes)
+		writeJSON(w, http.StatusOK, ApiResponse{Data: result})
+	}
+}
+
+// pdfPlainText pulls the text out of a PDF. A PDF that is a scan carries no text
+// at all, and one that is encrypted refuses to open; both come back as an error
+// naming the problem rather than as an empty extraction that looks like a
+// document with no findings in it.
+func pdfPlainText(data []byte) (string, error) {
+	rd, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return "", fmt.Errorf("this PDF could not be opened: %v. If it is password protected, remove the password and try again", err)
+	}
+	var b strings.Builder
+	pages := rd.NumPage()
+	for i := 1; i <= pages; i++ {
+		page := rd.Page(i)
+		if page.V.IsNull() {
+			continue
+		}
+		text, err := page.GetPlainText(nil)
+		if err != nil {
+			continue // one unreadable page should not lose the rest
+		}
+		b.WriteString(text)
+		b.WriteString("\n\f\n")
+	}
+	out := b.String()
+	if strings.TrimSpace(strings.ReplaceAll(out, "\f", "")) == "" {
+		return "", fmt.Errorf("no text could be read from this PDF - if it is a scan, the pages are images and there is nothing to read. Import the DOCX instead")
+	}
+	return out, nil
 }
 
 func HandleBulkCreateFindings(store *Store) http.HandlerFunc {

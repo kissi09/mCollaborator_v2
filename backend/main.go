@@ -58,6 +58,8 @@ func main() {
 			r.Get("/engagements/{id}/findings", HandleListFindings(store))
 			r.Post("/engagements/{id}/findings", requirePermission("finding:write", HandleCreateFinding(store)))
 			r.Post("/engagements/{id}/findings/bulk", requirePermission("finding:write", HandleBulkCreateFindings(store)))
+			// Reads a DOCX or PDF and hands back candidates to review. Saves nothing.
+			r.Post("/engagements/{id}/findings/extract", requirePermission("finding:write", HandleExtractFindings(store)))
 			r.Get("/engagements/{id}/findings/changes", HandleFindingsChanges(store))
 
 			// Findings
