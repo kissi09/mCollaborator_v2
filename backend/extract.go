@@ -573,15 +573,24 @@ var pdfLabels = []struct {
 	{"remediation", "recommendation"},
 }
 
-// ExtractFromPDFText reads findings out of a PDF's text.
+// ExtractFromPDFText reads findings out of a PDF, given its pages as visual
+// rows - one string per line as it appears on the page.
 //
-// A PDF has no tables left in it, only lines, so this is looser than the DOCX
-// path by nature: it walks the text watching for area headings and for the
-// labelled lines a finding is made of, and starts a new finding whenever a
-// second Description appears. Whatever it produces is reviewed before anything
-// is saved, which is why a looser parse is worth having at all.
+// A PDF has no tables left in it, only rows of text, so this is looser than the
+// DOCX path by nature and says so. What makes it work at all on a report from
+// this template is the numbering: a finding is a three-level heading ("3.3.2
+// Unsupported Windows Server 2012 R2 hosts") under a two-level area heading,
+// and the labelled rows follow it. A document from elsewhere still works as far
+// as it labels its rows.
+//
+// Two rules keep the noise out. A finding only starts at a heading or a
+// Description, never at any other label - the vulnerability register's own
+// "Recommendation" column heading would otherwise open one. And a candidate is
+// kept only if it has a title and something written under it, which is what
+// drops the table of contents, whose entries are headings with nothing beneath.
 func ExtractFromPDFText(text string) ([]ExtractedFinding, []string) {
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	rows := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	repeated := repeatedRows(rows)
 
 	var (
 		out          []ExtractedFinding
@@ -590,7 +599,6 @@ func ExtractFromPDFText(text string) ([]ExtractedFinding, []string) {
 		curKey       string
 		headingArea  string
 		headingLabel string
-		lastLine     string
 		page         = 1
 	)
 
@@ -598,46 +606,54 @@ func ExtractFromPDFText(text string) ([]ExtractedFinding, []string) {
 		if cur == nil {
 			return
 		}
-		if strings.TrimSpace(cur.Title) == "" && strings.TrimSpace(cur.Description) == "" {
-			cur = nil
-			return
+		// A heading with nothing under it is a table-of-contents entry.
+		hasBody := strings.TrimSpace(cur.Description) != "" || strings.TrimSpace(cur.Remediation) != ""
+		if strings.TrimSpace(cur.Title) != "" && hasBody {
+			cur.Remediation = stripRecommendationID(cur.Remediation)
+			if cur.Severity == "" {
+				cur.Severity = severityFromVector(cur.CVSSVector)
+			}
+			if cur.Severity == "" {
+				cur.Severity = "info"
+			}
+			placeArea(cur, headingArea, headingLabel)
+			out = append(out, *cur)
 		}
-		cur.Title = cleanTitle(cur.Title)
-		cur.Remediation = stripRecommendationID(cur.Remediation)
-		if cur.Severity == "" {
-			cur.Severity = "info"
-		}
-		placeArea(cur, headingArea, headingLabel)
-		out = append(out, *cur)
 		cur = nil
+		curKey = ""
 	}
 
 	appendTo := func(key, value string) {
 		if cur == nil || value == "" {
 			return
 		}
-		join := func(dst *string) {
+		join := func(dst *string, sep string) {
 			if *dst == "" {
 				*dst = value
 			} else {
-				*dst += " " + value
+				*dst += sep + value
 			}
 		}
 		switch key {
 		case "description":
-			join(&cur.Description)
+			join(&cur.Description, " ")
 		case "impact":
-			join(&cur.Impact)
+			join(&cur.Impact, " ")
 		case "cvss":
-			join(&cur.CVSSVector)
+			join(&cur.CVSSVector, " ")
 		case "attackvector":
-			join(&cur.AttackVector)
+			join(&cur.AttackVector, " ")
 		case "affected":
-			join(&cur.AffectedSystem)
+			join(&cur.AffectedSystem, " ")
 		case "poc":
-			join(&cur.POC)
+			join(&cur.POC, "\n")
 		case "recommendation":
-			join(&cur.Remediation)
+			// The "<id> - <header>" line repeats the sentence under it, so the
+			// id is not all that has to go.
+			if recIDRe.MatchString(value) {
+				return
+			}
+			join(&cur.Remediation, "\n")
 		case "rating":
 			if cur.Severity == "" {
 				cur.Severity = normalizeSeverity(value)
@@ -645,11 +661,11 @@ func ExtractFromPDFText(text string) ([]ExtractedFinding, []string) {
 		}
 	}
 
-	for _, raw := range lines {
-		line := strings.TrimSpace(raw)
-		if line == "\f" || strings.Contains(raw, "\f") {
+	for _, raw := range rows {
+		if strings.Contains(raw, "\f") {
 			page++
 		}
+		line := stripDotLeaders(strings.TrimSpace(strings.ReplaceAll(raw, "\f", "")))
 		if line == "" {
 			continue
 		}
@@ -657,54 +673,250 @@ func ExtractFromPDFText(text string) ([]ExtractedFinding, []string) {
 		if code, label, ok := areaFromHeading(line); ok {
 			flush()
 			headingArea, headingLabel = code, label
-			lastLine = ""
-			curKey = ""
 			continue
 		}
 
-		if key, value, ok := pdfLabelled(line); ok {
-			if key == "description" && cur != nil && cur.Description != "" {
+		if title, ok := findingHeading(line); ok {
+			flush()
+			cur = &ExtractedFinding{Ref: "p." + strconv.Itoa(page), Title: title}
+			continue
+		}
+
+		keys, ok := pdfLabelRow(line)
+		if ok {
+			// "Description Rating" is one row with two labels over one row of
+			// two values; the rating is the severity word on the end of it.
+			if keys[0] == "description" && cur != nil && cur.Description != "" {
 				flush()
 			}
 			if cur == nil {
-				cur = &ExtractedFinding{Ref: "p." + strconv.Itoa(page), Title: lastLine}
+				if keys[0] != "description" {
+					continue // a stray column heading, not the start of a finding
+				}
+				cur = &ExtractedFinding{Ref: "p." + strconv.Itoa(page)}
 			}
-			curKey = key
-			appendTo(key, value)
+			curKey = keys[0]
+			if len(keys) > 1 && keys[1] == "rating" {
+				curKey = "description+rating"
+			}
 			continue
 		}
 
-		if cur != nil && curKey != "" {
-			appendTo(curKey, line)
+		// The rating cell sits beside the description, so depending on how long
+		// the description is it lands either as a row of its own or in the
+		// middle of one. This is checked before the furniture filter because a
+		// rating word repeats once per finding of that severity.
+		if cur != nil && (curKey == "description+rating" || curKey == "rating") {
+			if sev, ok := ratingWords[line]; ok {
+				if cur.Severity == "" {
+					cur.Severity = sev
+				}
+				continue
+			}
+		}
+
+		// A running header or footer, which otherwise lands in whichever field
+		// was open when the page broke.
+		if repeated[furnitureKey(line)] {
 			continue
 		}
-		lastLine = line
+
+		if value, rest, ok := pdfLabelledInline(line); ok && cur != nil {
+			appendTo(value, rest)
+			curKey = value
+			continue
+		}
+
+		if cur == nil || curKey == "" {
+			continue
+		}
+		if curKey == "description+rating" {
+			body, sev := line, ""
+			if cur.Severity == "" {
+				body, sev = splitRatingWord(line)
+			}
+			appendTo("description", body)
+			if sev != "" {
+				cur.Severity = sev
+			}
+			continue
+		}
+		appendTo(curKey, line)
 	}
 	flush()
 
+	notes = append(notes, "Read from a PDF. A PDF keeps the words but not the table they sat in, so check the fields as well as the areas — the DOCX of the same report reads exactly.")
 	if len(out) == 0 {
-		notes = append(notes, "No findings were recognised in this PDF. PDFs keep the words but not the table they sat in, so a report whose findings are labelled Description, Rating and Recommendation reads best - the DOCX of the same report reads better still.")
+		notes = []string{"No findings were recognised in this PDF. If it is a scan the pages are images and there is nothing to read; otherwise import the DOCX of the same report, which reads exactly."}
 	}
 	return out, notes
 }
 
-// pdfLabelled splits "Affected Host: 10.0.0.1" into its field and value. It also
-// accepts a bare label on its own line, which is how a table row usually lands.
-func pdfLabelled(line string) (string, string, bool) {
-	low := strings.ToLower(line)
+// dotLeaderRe is a table-of-contents line's trailing dots and page number.
+var dotLeaderRe = regexp.MustCompile(`\s*\.{3,}\s*\d*\s*$`)
+
+func stripDotLeaders(s string) string { return strings.TrimSpace(dotLeaderRe.ReplaceAllString(s, "")) }
+
+// findingHeadingRe is the template's vulnerability heading: a three-level
+// section number and a name.
+var findingHeadingRe = regexp.MustCompile(`^(\d+\.\d+\.\d+)\.?\s+(\S.*)$`)
+
+func findingHeading(line string) (string, bool) {
+	m := findingHeadingRe.FindStringSubmatch(line)
+	if m == nil {
+		return "", false
+	}
+	title := strings.TrimSpace(m[2])
+	if len(title) < 4 {
+		return "", false
+	}
+	return title, true
+}
+
+// pdfLabelRow reads a row that is nothing but labels - "Recommendation" on its
+// own, or "Description Rating" where two cells sat side by side.
+func pdfLabelRow(line string) ([]string, bool) {
+	low := strings.ToLower(strings.TrimSpace(line))
+	if low == "" || len(low) > 40 {
+		return nil, false
+	}
+	var keys []string
+	rest := low
+	for rest != "" {
+		matched := false
+		for _, l := range pdfLabels {
+			if strings.HasPrefix(rest, l.prefix) {
+				keys = append(keys, l.key)
+				rest = strings.TrimSpace(rest[len(l.prefix):])
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil, false
+		}
+	}
+	if len(keys) == 0 {
+		return nil, false
+	}
+	return keys, true
+}
+
+// pdfLabelledInline reads "Affected Host: 10.0.0.1" - a label and its value on
+// one line, which is how a document that is not built from tables writes them.
+func pdfLabelledInline(line string) (string, string, bool) {
+	idx := strings.Index(line, ":")
+	if idx <= 0 || idx > 40 {
+		return "", "", false
+	}
+	head := strings.ToLower(strings.TrimSpace(line[:idx]))
+	rest := strings.TrimSpace(line[idx+1:])
 	for _, l := range pdfLabels {
-		if !strings.HasPrefix(low, l.prefix) {
+		if head != l.prefix {
 			continue
 		}
-		rest := strings.TrimSpace(line[len(l.prefix):])
-		rest = strings.TrimSpace(strings.TrimPrefix(rest, ":"))
-		// "Description of the estate" is prose, not a Description row.
-		if rest != "" && !strings.HasPrefix(strings.TrimSpace(line[len(l.prefix):]), ":") {
+		// A CVSS vector string starts "CVSS:3.1/..." - that colon belongs to
+		// the value, and splitting on it would strip the head off the vector.
+		if l.key == "cvss" && rest != "" && rest[0] >= '0' && rest[0] <= '9' {
 			return "", "", false
 		}
 		return l.key, rest, true
 	}
 	return "", "", false
+}
+
+// repeatedRows are the running headers and footers: rows that repeat page after
+// page at the top or the bottom of the page. Rebuilt rows carry them inline, so
+// without this the footer lands in whichever field was open when the page broke.
+//
+// Repetition alone is not enough to call a row furniture - "Adjacent Network"
+// is the attack vector of three findings in a row and repeats exactly like a
+// footer does. What separates them is position: furniture sits at the edge of
+// every page, and a value sits in the middle of one.
+func repeatedRows(rows []string) map[string]bool {
+	const (
+		repeatsToBeFurniture = 3
+		edgeRows             = 2 // how far in from the top and bottom to look
+	)
+
+	var pages [][]string
+	page := []string{}
+	for _, r := range rows {
+		if strings.Contains(r, "\f") {
+			pages = append(pages, page)
+			page = []string{}
+			continue
+		}
+		if line := strings.TrimSpace(r); line != "" {
+			page = append(page, line)
+		}
+	}
+	pages = append(pages, page)
+
+	count := map[string]int{}
+	for _, p := range pages {
+		// A page with no middle has no furniture to tell from its content.
+		if len(p) <= 2*edgeRows {
+			continue
+		}
+		seen := map[string]bool{}
+		for i, line := range p {
+			atEdge := i < edgeRows || i >= len(p)-edgeRows
+			if !atEdge || len(line) > 120 {
+				continue
+			}
+			key := furnitureKey(line)
+			if seen[key] {
+				continue // once per page, however many times it appears on it
+			}
+			seen[key] = true
+			count[key]++
+		}
+	}
+
+	out := map[string]bool{}
+	for key, n := range count {
+		if n >= repeatsToBeFurniture {
+			out[key] = true
+		}
+	}
+	return out
+}
+
+// pageNumberRe is the page number a footer carries, which is what stops two
+// occurrences of the same footer from looking the same.
+var pageNumberRe = regexp.MustCompile(`(?i)\s*(page\s+)?\d+\s*$`)
+
+func furnitureKey(line string) string {
+	return strings.TrimSpace(pageNumberRe.ReplaceAllString(line, ""))
+}
+
+// ratingWords are the rating cell's exact wordings. The comparison is
+// case-sensitive on purpose: prose says "a high risk", the rating cell says
+// "High", and only the capitalised form is the cell.
+var ratingWords = map[string]string{
+	"Critical": "critical", "High": "high", "Medium": "medium",
+	"Low": "low", "Informational": "info", "Info": "info",
+}
+
+// splitRatingWord pulls the rating out of a row that carried both a description
+// and a rating. Rows are rebuilt from position, so the rating cell's word lands
+// wherever that cell sat - often in the middle of the sentence beside it rather
+// than on the end - and taking only a trailing word would miss it.
+func splitRatingWord(line string) (string, string) {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return line, ""
+	}
+	for i, f := range fields {
+		sev, ok := ratingWords[strings.Trim(f, ".,;:")]
+		if !ok {
+			continue
+		}
+		rest := append(append([]string{}, fields[:i]...), fields[i+1:]...)
+		return strings.TrimSpace(strings.Join(rest, " ")), sev
+	}
+	return line, ""
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -146,25 +147,27 @@ func TestKeywordsMatchWholeWordsOnly(t *testing.T) {
 	}
 }
 
-// A PDF keeps the words but not the table. The line parser has to find the same
-// findings out of labelled lines.
+// A PDF keeps the words but not the table. The row parser has to find the same
+// findings out of the rows it does keep.
 func TestExtractFromPDFText(t *testing.T) {
 	text := strings.Join([]string{
 		"3.3 Internal Penetration Testing",
-		"SMB signing is not required on the domain controllers",
-		"Description:",
-		"Both domain controllers accept SMB sessions that are not signed.",
-		"Rating: High",
-		"Affected Hosts: 10.20.4.11, 10.20.4.12",
-		"Recommendation:",
+		"3.3.1 SMB signing is not required on the domain controllers",
+		"Description Rating",
+		"Both domain controllers accept SMB sessions that are not signed. High",
+		"Affected Hosts",
+		"10.20.4.11, 10.20.4.12",
+		"Recommendation",
+		"ATB_REC1_IPT1 \u2013 Require SMB signing",
 		"Require SMB signing through Group Policy.",
 		"3.7 Configuration Files Review",
-		"Default SNMP community string on the perimeter firewalls",
-		"Description:",
-		"All three appliances answer to the community string public.",
-		"Rating: High",
-		"Affected Device: fw-hq-01",
-		"Recommendation:",
+		"3.7.1 Default SNMP community string on the perimeter firewalls",
+		"Description Rating",
+		"All three appliances answer to the community string public. High",
+		"Affected Device",
+		"fw-hq-01",
+		"Recommendation",
+		"ATB_REC2_CFG1 \u2013 Replace the community strings",
 		"Set a unique community string.",
 	}, "\n")
 
@@ -180,14 +183,20 @@ func TestExtractFromPDFText(t *testing.T) {
 	if first.Category != "IPT" || first.Confidence != ConfHeading {
 		t.Errorf("first finding area = %q/%q, want IPT from its heading", first.Category, first.Confidence)
 	}
+	if first.Title != "SMB signing is not required on the domain controllers" {
+		t.Errorf("first finding title = %q", first.Title)
+	}
 	if first.Severity != "high" {
-		t.Errorf("first finding severity = %q, want high", first.Severity)
+		t.Errorf("first finding severity = %q, want high - it was on the end of the description row", first.Severity)
 	}
 	if first.AffectedSystem != "10.20.4.11, 10.20.4.12" {
 		t.Errorf("first finding affected = %q", first.AffectedSystem)
 	}
-	if !strings.Contains(first.Description, "not signed") {
-		t.Errorf("first finding description = %q", first.Description)
+	if !strings.Contains(first.Description, "not signed") || strings.HasSuffix(first.Description, "High") {
+		t.Errorf("first finding description = %q, want the rating split off the end", first.Description)
+	}
+	if strings.Contains(first.Remediation, "_REC") {
+		t.Errorf("first finding recommendation still carries its id: %q", first.Remediation)
 	}
 
 	second := found[1]
@@ -199,16 +208,90 @@ func TestExtractFromPDFText(t *testing.T) {
 	}
 }
 
-// "Description of the estate" is prose, not a Description row.
-func TestPDFLabelNeedsItsColon(t *testing.T) {
-	if _, _, ok := pdfLabelled("Description of the estate follows"); ok {
-		t.Error("a sentence starting with a label word was taken as a labelled row")
+// A table of contents is a list of headings with nothing under them, and must
+// not come back as a list of empty findings.
+func TestPDFTableOfContentsIsNotFindings(t *testing.T) {
+	text := strings.Join([]string{
+		"Contents",
+		"3.3 Internal Penetration Testing ................................ 19",
+		"3.3.1 SMB signing is not required on the domain controllers ..... 19",
+		"3.3.2 Unsupported Windows Server 2012 R2 hosts .................. 21",
+		"3.7 Configuration Files Review .................................. 38",
+	}, "\n")
+	found, _ := ExtractFromPDFText(text)
+	if len(found) != 0 {
+		t.Errorf("the table of contents produced %d findings: %+v", len(found), found)
 	}
-	if key, val, ok := pdfLabelled("Impact: Full account takeover."); !ok || key != "impact" || val != "Full account takeover." {
-		t.Errorf("pdfLabelled = %q/%q/%v", key, val, ok)
+}
+
+// The vulnerability register's own column headings must not open a finding.
+func TestPDFStrayLabelDoesNotStartAFinding(t *testing.T) {
+	text := strings.Join([]string{
+		"3.2 Vulnerability Register",
+		"Vulnerability Exposure Criticality Recommendation",
+		"SMB signing not required Internal High ATB_REC1_IPT1",
+		"3.3 Internal Penetration Testing",
+	}, "\n")
+	found, _ := ExtractFromPDFText(text)
+	if len(found) != 0 {
+		t.Errorf("a column heading opened a finding: %+v", found)
 	}
-	if key, val, ok := pdfLabelled("Recommendation"); !ok || key != "recommendation" || val != "" {
-		t.Errorf("a bare label on its own line should open the field: %q/%q/%v", key, val, ok)
+}
+
+func TestPDFLabelRowParsing(t *testing.T) {
+	if keys, ok := pdfLabelRow("Description Rating"); !ok || len(keys) != 2 || keys[0] != "description" || keys[1] != "rating" {
+		t.Errorf("pdfLabelRow(Description Rating) = %v/%v", keys, ok)
+	}
+	if _, ok := pdfLabelRow("Description of the estate follows"); ok {
+		t.Error("a sentence starting with a label word was taken as a label row")
+	}
+	if key, val, ok := pdfLabelledInline("Impact: Full account takeover."); !ok || key != "impact" || val != "Full account takeover." {
+		t.Errorf("pdfLabelledInline = %q/%q/%v", key, val, ok)
+	}
+}
+
+// A running footer repeats at the foot of every page and would otherwise be
+// appended to whichever field was open when the page broke. A value that
+// happens to repeat as often must survive, which is why position decides it.
+func TestPDFFooterIsDroppedButRepeatedValuesSurvive(t *testing.T) {
+	var rows []string
+	for page := 1; page <= 3; page++ {
+		rows = append(rows,
+			// The footer sits at the top and bottom of every page; everything
+			// between is the page's own content.
+			"Cyberteq Falcon Ltd. VAPT Report Page "+strconv.Itoa(page),
+			"3.3 Internal Penetration Testing",
+			"3.3."+strconv.Itoa(page)+" Finding number "+strconv.Itoa(page),
+			"Description Rating",
+			"A weakness was found on host "+strconv.Itoa(page)+". High",
+			"Impact",
+			"It lets an attacker move sideways.",
+			"CVSS Vector",
+			"CVSS:3.1/AV:A/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+			"Attack Vector",
+			"Adjacent Network",
+			"Recommendation",
+			"Fix it on host "+strconv.Itoa(page)+".",
+			"Cyberteq Falcon Ltd. VAPT Report Page "+strconv.Itoa(page),
+			"All rights reserved Ref: TEST-REP-001",
+			"\f")
+	}
+
+	found, _ := ExtractFromPDFText(strings.Join(rows, "\n"))
+	if len(found) != 3 {
+		t.Fatalf("read %d findings, want 3: %+v", len(found), found)
+	}
+	for i, f := range found {
+		if f.AttackVector != "Adjacent Network" {
+			t.Errorf("finding %d: attack vector = %q - a value repeating as often as a footer was dropped with it", i, f.AttackVector)
+		}
+		if strings.Contains(f.AttackVector+f.Description, "Cyberteq Falcon") ||
+			strings.Contains(f.AttackVector+f.Description, "All rights reserved") {
+			t.Errorf("finding %d: the page furniture landed in a field: %+v", i, f)
+		}
+		if f.Severity != "high" {
+			t.Errorf("finding %d: severity = %q, want high", i, f.Severity)
+		}
 	}
 }
 

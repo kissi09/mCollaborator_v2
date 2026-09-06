@@ -540,28 +540,41 @@ func HandleExtractFindings(store *Store) http.HandlerFunc {
 	}
 }
 
-// pdfPlainText pulls the text out of a PDF. A PDF that is a scan carries no text
-// at all, and one that is encrypted refuses to open; both come back as an error
-// naming the problem rather than as an empty extraction that looks like a
-// document with no findings in it.
+// pdfPlainText pulls the text out of a PDF as visual rows - one line per line
+// on the page.
+//
+// GetPlainText breaks at every change of formatting, so "Affected Hosts" comes
+// back as "Affected Host" and "s" on separate lines and the labels a finding is
+// made of are unreadable. GetTextByRow groups by position instead, which puts a
+// table row back together.
+//
+// A PDF that is a scan carries no text at all and one that is encrypted refuses
+// to open; both come back as an error naming the problem rather than as an empty
+// extraction that looks like a document with no findings in it.
 func pdfPlainText(data []byte) (string, error) {
 	rd, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return "", fmt.Errorf("this PDF could not be opened: %v. If it is password protected, remove the password and try again", err)
 	}
 	var b strings.Builder
-	pages := rd.NumPage()
-	for i := 1; i <= pages; i++ {
+	for i := 1; i <= rd.NumPage(); i++ {
 		page := rd.Page(i)
 		if page.V.IsNull() {
 			continue
 		}
-		text, err := page.GetPlainText(nil)
+		rows, err := page.GetTextByRow()
 		if err != nil {
 			continue // one unreadable page should not lose the rest
 		}
-		b.WriteString(text)
-		b.WriteString("\n\f\n")
+		for _, row := range rows {
+			var line strings.Builder
+			for _, t := range row.Content {
+				line.WriteString(t.S)
+			}
+			b.WriteString(strings.TrimSpace(line.String()))
+			b.WriteString("\n")
+		}
+		b.WriteString("\f\n")
 	}
 	out := b.String()
 	if strings.TrimSpace(strings.ReplaceAll(out, "\f", "")) == "" {
