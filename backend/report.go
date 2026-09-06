@@ -15,26 +15,34 @@ import (
 )
 
 type ReportConfig struct {
-	CompanyName     string          `json:"company_name"`     // Client company name -> [Company Name]
-	CompanyInitials string          `json:"company_initials"` // -> [Company Initials], derived when blank
-	CompanyLogo     string          `json:"company_logo"`     // Client logo (base64) dropped into the header slot
-	EngagementName  string          `json:"engagement_name"`  // e.g. "VAPT Report"
-	ClientEmail     string          `json:"client_email"`
-	RefNumber       string          `json:"ref_number"`       // e.g. GH-REP-035-26059-01 -> [Reference Number]
-	ReportDate      string          `json:"report_date"`      // -> [Date] on the cover
-	AssessmentStart string          `json:"assessment_start"` // e.g. "17th June 2026"
-	AssessmentEnd   string          `json:"assessment_end"`   // e.g. "24th June 2026"
-	TesterName      string          `json:"tester_name"`
-	ApproverName    string          `json:"approver_name"`
-	ApproverTitle   string          `json:"approver_title"` // -> [Role]
-	VersionLabel    string          `json:"version_label"`
-	Introduction    string          `json:"introduction"` // Custom exec summary intro (optional)
-	Scope           []string        `json:"scope"`
-	OutOfScope      []string        `json:"out_of_scope"`
-	Areas           []ReportArea    `json:"areas"`    // Assessment areas in scope, each with its scope text
-	Sections        []string        `json:"sections"` // Legacy area selection (wpt, ept, ipt, nar)
-	Findings        []ReportFinding `json:"findings"`
-	Tools           []string        `json:"tools"`
+	CompanyName     string `json:"company_name"`     // Client company name -> [Company Name]
+	CompanyInitials string `json:"company_initials"` // -> [Company Initials], derived when blank
+	CompanyLogo     string `json:"company_logo"`     // Client logo (base64) dropped into the header slot
+	EngagementName  string `json:"engagement_name"`  // e.g. "VAPT Report"
+	ClientEmail     string `json:"client_email"`
+	RefNumber       string `json:"ref_number"`       // e.g. GH-REP-035-26059-01 -> [Reference Number]
+	ReportDate      string `json:"report_date"`      // -> [Date] on the cover
+	AssessmentStart string `json:"assessment_start"` // e.g. "17th June 2026"
+	AssessmentEnd   string `json:"assessment_end"`   // e.g. "24th June 2026"
+	// The cover table's Authors column holds two entries. TesterName is the
+	// primary author and fills the first; SecondAuthorName fills the one below
+	// it, and is left out of the report entirely when blank. Both titles
+	// default to "Cybersecurity Expert", the wording the template ships.
+	TesterName        string `json:"tester_name"`
+	TesterTitle       string `json:"tester_title"`
+	SecondAuthorName  string `json:"second_author_name"`
+	SecondAuthorTitle string `json:"second_author_title"`
+
+	ApproverName  string          `json:"approver_name"`
+	ApproverTitle string          `json:"approver_title"` // -> [Role]
+	VersionLabel  string          `json:"version_label"`
+	Introduction  string          `json:"introduction"` // Custom exec summary intro (optional)
+	Scope         []string        `json:"scope"`
+	OutOfScope    []string        `json:"out_of_scope"`
+	Areas         []ReportArea    `json:"areas"`    // Assessment areas in scope, each with its scope text
+	Sections      []string        `json:"sections"` // Legacy area selection (wpt, ept, ipt, nar)
+	Findings      []ReportFinding `json:"findings"`
+	Tools         []string        `json:"tools"`
 
 	// Appendix test accounts. When both lists are empty the appendix is dropped
 	// from the report entirely rather than printed with blank credential rows.
@@ -81,8 +89,9 @@ type ReportFinding struct {
 	// counts towards. Falls back to Category for engagements predating areas.
 	Area string `json:"area"`
 
-	// AttackVector fills the template's "Attack Vector" cell; when empty it is
-	// derived from the CVSS vector string.
+	// AttackVector fills the template's "Attack Vector" cell. Only the IPT, ADT
+	// and WNA layouts print it; on the others it is derived from the CVSS vector
+	// string when left blank.
 	AttackVector string `json:"attack_vector"`
 
 	// RecommendationHeader is the short title printed next to the vulnerability

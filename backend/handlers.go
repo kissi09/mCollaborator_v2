@@ -327,6 +327,7 @@ type createFindingInput struct {
 	Category       string   `json:"category,omitempty"`
 	Severity       string   `json:"severity"`
 	AffectedSystem string   `json:"affected_system,omitempty"`
+	AttackVector   string   `json:"attack_vector,omitempty"`
 	CVSSVector     string   `json:"cvss_vector,omitempty"`
 	CVSSScore      float64  `json:"cvss_score"`
 	Status         string   `json:"status"`
@@ -375,7 +376,8 @@ func HandleCreateFinding(store *Store) http.HandlerFunc {
 			EngagementID: engID, NodeID: input.NodeID, Title: input.Title,
 			CVE: input.CVE, CWEs: input.CWEs, MitreAttackIDs: input.MitreAttackIDs,
 			Category: input.Category, AffectedSystem: input.AffectedSystem,
-			Severity: input.Severity, CVSSVector: input.CVSSVector, CVSSScore: input.CVSSScore,
+			AttackVector: input.AttackVector,
+			Severity:     input.Severity, CVSSVector: input.CVSSVector, CVSSScore: input.CVSSScore,
 			Status: input.Status, Description: input.Description, POC: input.POC,
 			Remediation: input.Remediation, Impact: input.Impact, Likelihood: input.Likelihood,
 			AssignedTo: input.AssignedTo, EvidenceIDs: input.EvidenceIDs, CreatedBy: user.ID,
@@ -408,6 +410,7 @@ func HandleUpdateFinding(store *Store) http.HandlerFunc {
 		finding.MitreAttackIDs = input.MitreAttackIDs
 		finding.Category = input.Category
 		finding.AffectedSystem = input.AffectedSystem
+		finding.AttackVector = input.AttackVector
 		finding.Severity = input.Severity
 		finding.CVSSVector = input.CVSSVector
 		finding.CVSSScore = input.CVSSScore
@@ -471,7 +474,8 @@ func HandleBulkCreateFindings(store *Store) http.HandlerFunc {
 				EngagementID: engID, NodeID: inp.NodeID, Title: inp.Title,
 				CVE: inp.CVE, CWEs: inp.CWEs, MitreAttackIDs: inp.MitreAttackIDs,
 				Category: inp.Category, AffectedSystem: inp.AffectedSystem,
-				Severity: inp.Severity, CVSSVector: inp.CVSSVector, CVSSScore: inp.CVSSScore,
+				AttackVector: inp.AttackVector,
+				Severity:     inp.Severity, CVSSVector: inp.CVSSVector, CVSSScore: inp.CVSSScore,
 				Status: inp.Status, Description: inp.Description, POC: inp.POC,
 				Remediation: inp.Remediation, Impact: inp.Impact, Likelihood: inp.Likelihood,
 				AssignedTo: inp.AssignedTo, EvidenceIDs: inp.EvidenceIDs, CreatedBy: user.ID,

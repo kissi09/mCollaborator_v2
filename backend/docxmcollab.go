@@ -1592,6 +1592,160 @@ func fillAccountTable(tbl string, accounts []TestAccount, hasHeader bool) string
 }
 
 // ---------------------------------------------------------------------------
+// cover table authors
+// ---------------------------------------------------------------------------
+
+// authorPlaceholder is the token the template puts in both of its author cells.
+const authorPlaceholder = "[Tester Name]"
+
+// defaultAuthorTitle is the role the template prints under an author's name. It
+// is literal text in the document, not a placeholder, so an author who is given
+// no title of their own keeps the wording the template shipped with.
+const defaultAuthorTitle = "Cybersecurity Expert"
+
+// reportAuthor is one entry in the cover table's Authors column: a name with the
+// role printed beneath it.
+type reportAuthor struct {
+	Name  string
+	Title string
+}
+
+// reportAuthors lists the authors in the order they are printed.
+func reportAuthors(config ReportConfig) []reportAuthor {
+	var out []reportAuthor
+	add := func(name, title string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if title = strings.TrimSpace(title); title == "" {
+			title = defaultAuthorTitle
+		}
+		out = append(out, reportAuthor{Name: name, Title: title})
+	}
+	add(config.TesterName, config.TesterTitle)
+	add(config.SecondAuthorName, config.SecondAuthorTitle)
+	return out
+}
+
+// renderAuthors fills the cover table's Authors column.
+//
+// The template ships two author cells and both hold "[Tester Name]" above the
+// literal role. Substituting that placeholder the way every other scalar is
+// substituted wrote the same person into both, so every report claimed two
+// authors and named the same one twice. The cells are filled independently
+// here: the primary author into the first, the second author into the one below
+// it, and a cell with no author behind it is removed - together with its row
+// when nothing else is in it - rather than left as a duplicate or as a blank
+// ruled line.
+//
+// It runs before renderCoverTable so that a row dropped here never gets one of
+// the cover rules drawn under it.
+func renderAuthors(doc string, config ReportConfig) string {
+	authors := reportAuthors(config)
+
+	children := bodyChildren(doc)
+	tblIdx := -1
+	for i, c := range children {
+		if c.Tag == "w:tbl" {
+			tblIdx = i
+			break
+		}
+	}
+	if tblIdx < 0 {
+		return doc
+	}
+	tbl := doc[children[tblIdx].Start:children[tblIdx].End]
+
+	type slot struct{ row, cell int }
+	rows := tableRows(tbl)
+	var slots []slot
+	for ri, r := range rows {
+		row := tbl[r.Start:r.End]
+		for ci, c := range rowCells(row) {
+			if strings.Contains(elemText(row[c.Start:c.End]), authorPlaceholder) {
+				slots = append(slots, slot{ri, ci})
+			}
+		}
+	}
+	if len(slots) == 0 {
+		return doc
+	}
+
+	// Back to front: the offsets in rows and cells are taken from the table as
+	// it was read, and rewriting the last slot first keeps the earlier ones
+	// pointing where they did.
+	for i := len(slots) - 1; i >= 0; i-- {
+		s := slots[i]
+		row := tbl[rows[s.row].Start:rows[s.row].End]
+		cells := rowCells(row)
+		if s.cell >= len(cells) {
+			continue
+		}
+		if i >= len(authors) && authorRowIsSpare(row, cells, s.cell) {
+			tbl = tbl[:rows[s.row].Start] + tbl[rows[s.row].End:]
+			continue
+		}
+		var author reportAuthor
+		if i < len(authors) {
+			author = authors[i]
+		}
+		cell := setAuthorCell(row[cells[s.cell].Start:cells[s.cell].End], author)
+		row = row[:cells[s.cell].Start] + cell + row[cells[s.cell].End:]
+		tbl = tbl[:rows[s.row].Start] + row + tbl[rows[s.row].End:]
+	}
+
+	return doc[:children[tblIdx].Start] + tbl + doc[children[tblIdx].End:]
+}
+
+// authorRowIsSpare reports whether a row holds nothing but its author cell, and
+// so can go when there is no author to print in it.
+func authorRowIsSpare(row string, cells []span, skip int) bool {
+	for ci, c := range cells {
+		if ci == skip {
+			continue
+		}
+		if strings.TrimSpace(elemText(row[c.Start:c.End])) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// setAuthorCell writes a name into the cell's first paragraph and the role into
+// the second. Each paragraph keeps its own formatting, which is the reason for
+// not going through setCellLines: that clones the first paragraph for every
+// line and would print the role in the name's style.
+func setAuthorCell(cell string, a reportAuthor) string {
+	paras := childElems(cell, "w:p")
+	if len(paras) == 0 {
+		return cell
+	}
+	if len(paras) == 1 {
+		// A template variant with the role on the same line as the name: keep
+		// both rather than dropping the role on the floor.
+		line := strings.TrimSpace(a.Name + " " + a.Title)
+		if strings.TrimSpace(a.Name) == "" {
+			line = ""
+		}
+		return cell[:paras[0].Start] + setParaText(cell[paras[0].Start:paras[0].End], line) + cell[paras[0].End:]
+	}
+	for i := len(paras) - 1; i >= 0; i-- {
+		var text string
+		switch i {
+		case 0:
+			text = a.Name
+		case 1:
+			if strings.TrimSpace(a.Name) != "" {
+				text = a.Title
+			}
+		}
+		cell = cell[:paras[i].Start] + setParaText(cell[paras[i].Start:paras[i].End], text) + cell[paras[i].End:]
+	}
+	return cell
+}
+
+// ---------------------------------------------------------------------------
 // scalar placeholders
 // ---------------------------------------------------------------------------
 

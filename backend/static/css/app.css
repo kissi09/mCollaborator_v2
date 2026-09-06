@@ -423,6 +423,20 @@ input, textarea, select, button { font-family: inherit; }
 .fe-hint { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
 .fe-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+/* What the selected area's block in the template actually prints. Shown under
+   the area picker so the fields that appear and disappear are explained. */
+.fe-layout-note {
+  margin-top: 4px; padding: 10px 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--primary); border-radius: var(--radius);
+  font-size: 12px; line-height: 1.7; color: var(--text-muted);
+}
+.fe-chip {
+  display: inline-block; margin: 2px 4px 2px 0; padding: 1px 7px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text);
+}
+
 /* The preview mirrors the report's vulnerability entry: heading, rating,
    then the same four sections in the same order. */
 .fe-preview { flex: 1; overflow-y: auto; padding: 24px 28px 56px; }

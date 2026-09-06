@@ -94,21 +94,25 @@ type Finding struct {
 	// AffectedSystem is the host, URL or endpoint the finding was proved on. It
 	// prints as "Affected Host" in the closing deck and fills the affected
 	// column of the report, so the editor's value has to survive the round trip.
-	AffectedSystem string   `json:"affected_system,omitempty"`
-	CVSSVector     string   `json:"cvss_vector,omitempty"`
-	CVSSScore      float64  `json:"cvss_score"`
-	Status         string   `json:"status"`
-	Description    string   `json:"description"`
-	POC            string   `json:"poc,omitempty"`
-	Remediation    string   `json:"remediation,omitempty"`
-	Impact         string   `json:"impact,omitempty"`
-	Likelihood     string   `json:"likelihood,omitempty"`
-	AssignedTo     string   `json:"assigned_to,omitempty"`
-	EvidenceIDs    []string `json:"evidence_ids,omitempty"` // evidence records attached as PoC screenshots
-	CreatedBy      string   `json:"created_by"`
-	Version        int      `json:"version"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
+	AffectedSystem string `json:"affected_system,omitempty"`
+	// AttackVector fills the "Attack Vector" row that the IPT, ADT and WNA
+	// layouts print. Those last two carry no CVSS vector for it to be guessed
+	// from, so it has to be typed and stored.
+	AttackVector string   `json:"attack_vector,omitempty"`
+	CVSSVector   string   `json:"cvss_vector,omitempty"`
+	CVSSScore    float64  `json:"cvss_score"`
+	Status       string   `json:"status"`
+	Description  string   `json:"description"`
+	POC          string   `json:"poc,omitempty"`
+	Remediation  string   `json:"remediation,omitempty"`
+	Impact       string   `json:"impact,omitempty"`
+	Likelihood   string   `json:"likelihood,omitempty"`
+	AssignedTo   string   `json:"assigned_to,omitempty"`
+	EvidenceIDs  []string `json:"evidence_ids,omitempty"` // evidence records attached as PoC screenshots
+	CreatedBy    string   `json:"created_by"`
+	Version      int      `json:"version"`
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
 }
 
 type Evidence struct {

@@ -582,6 +582,39 @@ async function markEngagementCompleted(engId) {
 // anything left untouched was published as if it had been written - so the
 // fields start empty now and the example lives in the placeholders instead.
 
+// AREA_LAYOUTS is what each area's block in the Word template actually prints.
+// The eight blocks do not agree: a configuration review prints a description, a
+// rating, the affected device and a recommendation and nothing else, while a web
+// application finding also carries a CVSS vector, an impact and a proof of
+// concept. Asking for a CVSS vector on a config finding produces a field that
+// goes nowhere, and not asking for the attack vector on an Active Directory
+// finding leaves the template's own row to be guessed at.
+//
+// Pinned on the Go side by TestSectionLayoutsCarryTheirOwnLabels, which reads
+// the labels out of the template itself. If that test fails, this table is what
+// has to change with it.
+const AREA_LAYOUTS = {
+  IPT:  { affected: 'Affected Hosts',       rows: ['cvss', 'attackVector'] },
+  EPT:  { affected: 'Affected Host',        rows: ['impact', 'cvss'] },
+  IPTC: { affected: 'Affected Host',        rows: ['cvss', 'impact', 'poc'] },
+  WPT:  { affected: 'Affected Application', rows: ['cvss', 'impact', 'poc'] },
+  CFG:  { affected: 'Affected Device',      rows: [] },
+  // The template ships no API Security Assessment block, so the report prints
+  // API findings under the web application layout.
+  ASA:  { affected: 'Affected Application', rows: ['cvss', 'impact', 'poc'], borrowedFrom: 'Web Application Penetration Testing' },
+  ADT:  { affected: 'Affected Domain',      rows: ['attackVector', 'poc'] },
+  WNA:  { affected: 'Affected SSIDs',       rows: ['attackVector', 'poc'] },
+  NAR:  { affected: 'Affected Network',     rows: [] }
+};
+
+function areaLayout(code) {
+  return AREA_LAYOUTS[code] || AREA_LAYOUTS.WPT;
+}
+
+function layoutHas(code, row) {
+  return areaLayout(code).rows.indexOf(row) !== -1;
+}
+
 const FINDING_SEVERITIES = [
   { value: 'critical', label: 'Critical' },
   { value: 'high',     label: 'High' },
@@ -595,6 +628,62 @@ const FINDING_STATUSES = [
   { value: 'open',        label: 'Open' },
   { value: 'in_progress', label: 'In Progress' }
 ];
+
+// findingEditorState holds the whole form. The fields on screen change with the
+// area, so a value cannot live only in its input: switching from a web
+// application finding to a configuration review and back has to bring the impact
+// and the CVSS vector back with it, and saving must not drop what the current
+// layout happens not to show.
+let findingEditorState = null;
+
+function newFindingEditorState(f) {
+  f = f || {};
+  const score = (f.cvss_score === 0 || f.cvss_score) ? String(f.cvss_score) : '';
+  return {
+    id: f.id || '',
+    title: f.title || '',
+    severity: f.severity || 'high',
+    status: f.status || 'open',
+    area: normalizeAreaCode(f.category) || REPORT_AREAS[0].code,
+    description: f.description || '',
+    impact: f.impact || '',
+    attackVector: f.attack_vector || '',
+    affected: f.affected_system || f.node_id || '',
+    cvssVector: f.cvss_vector || '',
+    cvssScore: score,
+    cve: f.cve || '',
+    poc: f.poc || '',
+    recommendation: f.remediation || '',
+    evidenceIds: Array.isArray(f.evidence_ids) ? f.evidence_ids.slice() : []
+  };
+}
+
+// captureFindingEditor copies the inputs that are currently on screen back into
+// the state. Fields the layout hides are simply not present and keep the value
+// they already had.
+function captureFindingEditor() {
+  if (!findingEditorState) return;
+  const s = findingEditorState;
+  const read = (id, key) => {
+    const el = document.getElementById(id);
+    if (el) s[key] = el.value;
+  };
+  read('finding-title', 'title');
+  read('finding-severity', 'severity');
+  read('finding-status', 'status');
+  read('finding-category', 'area');
+  read('finding-description', 'description');
+  read('finding-impact', 'impact');
+  read('finding-attack-vector', 'attackVector');
+  read('finding-affected', 'affected');
+  read('finding-cvss-vector', 'cvssVector');
+  read('finding-cvss', 'cvssScore');
+  read('finding-cve', 'cve');
+  read('finding-poc', 'poc');
+  read('finding-recommendation', 'recommendation');
+  const ev = document.getElementById('finding-evidence-ids');
+  if (ev) s.evidenceIds = ev.value.split(',').map(x => x.trim()).filter(Boolean);
+}
 
 // feField and friends keep the form's markup to the parts that differ, so a new
 // field is one line and every field carries the same label, spacing and hint.
@@ -621,11 +710,11 @@ function feTextarea(label, id, value, placeholder, rows, hint) {
     </div>`;
 }
 
-function feSelect(label, id, options, selected, hint) {
+function feSelect(label, id, options, selected, hint, onchange) {
   return `
     <div class="fe-field">
       <label for="${id}">${label}</label>
-      <select class="input w-full" id="${id}">
+      <select class="input w-full" id="${id}" ${onchange ? `onchange="${onchange}"` : ''}>
         ${options.map(o => `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`).join('')}
       </select>
       ${hint ? `<div class="fe-hint">${hint}</div>` : ''}
@@ -634,11 +723,9 @@ function feSelect(label, id, options, selected, hint) {
 
 function renderFindingEditor() {
   const f = MCOLLABORATOR.currentFinding || {};
+  findingEditorState = newFindingEditorState(f);
   const isEdit = !!f.id;
   const eng = MCOLLABORATOR.currentEngagement;
-  // Values are written into the markup rather than poked in afterwards, so the
-  // form never flashes one finding's text before another's arrives.
-  const area = normalizeAreaCode(f.category) || (REPORT_AREAS[0] && REPORT_AREAS[0].code);
 
   return `
     <div class="finding-editor" style="margin:-24px;">
@@ -664,63 +751,7 @@ function renderFindingEditor() {
 
       <div class="fe-body">
         <div class="fe-form" id="finding-editor-form">
-
-          <div class="fe-section">
-            <div class="fe-section-title">Identification</div>
-            ${feField('Title', 'finding-title', f.title, 'e.g. SQL injection in the login module', { required: true })}
-            <div class="fe-grid-2">
-              ${feSelect('Severity', 'finding-severity', FINDING_SEVERITIES, (f.severity || 'high'))}
-              ${feSelect('Status', 'finding-status', FINDING_STATUSES, (f.status || 'open'))}
-            </div>
-            ${feSelect('Area of Assessment', 'finding-category',
-                       REPORT_AREAS.map(a => ({ value: a.code, label: `${a.label} (${a.code})` })), area,
-                       'Decides the report section, the vulnerability id and the bar this finding counts towards in the findings-by-area chart.')}
-          </div>
-
-          <div class="fe-section">
-            <div class="fe-section-title">The vulnerability</div>
-            ${feTextarea('Description', 'finding-description', f.description,
-                         'What the weakness is and where it was found.', 5)}
-            ${feTextarea('Impact', 'finding-impact', f.impact,
-                         'What it lets an attacker do, in business terms.', 4)}
-          </div>
-
-          <div class="fe-section">
-            <div class="fe-section-title">Rating &amp; target</div>
-            ${feField('Affected System', 'finding-affected', f.affected_system || f.node_id,
-                      'e.g. portal.example.com  /  10.0.4.12 (445)',
-                      { mono: true, hint: 'Printed as the affected host in the report and on the deck&rsquo;s scenario slide.' })}
-            ${feField('CVSS v3.1 Vector', 'finding-cvss-vector', f.cvss_vector,
-                      'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', { mono: true })}
-            <div class="fe-grid-2">
-              ${feField('CVSS Score', 'finding-cvss', f.cvss_score, '0.0 - 10.0', { type: 'number', step: '0.1' })}
-              ${feField('CVE', 'finding-cve', f.cve, 'CVE-YYYY-NNNNN', { mono: true })}
-            </div>
-          </div>
-
-          <div class="fe-section">
-            <div class="fe-section-title">Proof of concept</div>
-            <div class="fe-field">
-              <label for="finding-poc">Steps and proof</label>
-              <textarea class="input w-full" id="finding-poc" rows="7"
-                        placeholder="Request, response, commands - whatever proves it. Screenshots attached below are appended here."
-                        style="resize:vertical;font-family:var(--font-mono);font-size:12px;line-height:1.6;">${sanitizeInput(f.poc || '')}</textarea>
-              <div class="flex items-center gap-2" style="margin-top:8px;flex-wrap:wrap;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('poc-image-input').click()">&#8593; Upload screenshot</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="showEvidencePickerForPoc()">&#128206; From Evidence vault</button>
-                <span class="fe-hint" style="margin:0;">A finding only gets a scenario slide in the closing deck if it has a screenshot.</span>
-              </div>
-              <input type="file" id="poc-image-input" accept="image/*" style="display:none;" onchange="insertPocImage(this)">
-              <div id="finding-poc-evidence" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
-              <input type="hidden" id="finding-evidence-ids" value="${(f.evidence_ids || []).join(',')}">
-            </div>
-          </div>
-
-          <div class="fe-section">
-            <div class="fe-section-title">Recommendation</div>
-            ${feTextarea('How to fix it', 'finding-recommendation', f.remediation,
-                         'The remediation the client is asked to carry out.', 4)}
-          </div>
+          <div id="fe-fields">${renderFindingFields()}</div>
         </div>
 
         <div class="fe-preview-pane">
@@ -735,32 +766,152 @@ function renderFindingEditor() {
   `;
 }
 
-// feValue reads one editor field, trimmed. Everything the preview shows comes
-// through here so an empty field and a whitespace-only one look the same.
-function feValue(id) {
-  const el = document.getElementById(id);
-  return el ? (el.value || '').trim() : '';
+// renderFindingFields draws the form for the area that is selected. Changing the
+// area redraws only this, so the delegated listener on the form around it stays
+// attached.
+function renderFindingFields() {
+  const s = findingEditorState;
+  const layout = areaLayout(s.area);
+  const area = REPORT_AREAS.find(a => a.code === s.area);
+  const areaName = area ? area.label : s.area;
+
+  const printed = ['Description', 'Rating']
+    .concat(layout.rows.indexOf('impact') !== -1 ? ['Impact'] : [])
+    .concat(layout.rows.indexOf('cvss') !== -1 ? ['CVSS Vector'] : [])
+    .concat(layout.rows.indexOf('attackVector') !== -1 ? ['Attack Vector'] : [])
+    .concat([layout.affected])
+    .concat(layout.rows.indexOf('poc') !== -1 ? ['PoC'] : [])
+    .concat(['Recommendation']);
+
+  return `
+    <div class="fe-section">
+      <div class="fe-section-title">Identification</div>
+      ${feField('Title', 'finding-title', s.title, 'e.g. SQL injection in the login module', { required: true })}
+      <div class="fe-grid-2">
+        ${feSelect('Severity (Rating)', 'finding-severity', FINDING_SEVERITIES, s.severity)}
+        ${feSelect('Status', 'finding-status', FINDING_STATUSES, s.status)}
+      </div>
+      ${feSelect('Area of Assessment', 'finding-category',
+                 REPORT_AREAS.map(a => ({ value: a.code, label: `${a.label} (${a.code})` })), s.area,
+                 'Decides which section of the report the finding prints in, its vulnerability id, and which fields below are asked for.',
+                 'changeFindingArea(this.value)')}
+      <div class="fe-layout-note">
+        <strong>${sanitizeInput(areaName)}</strong> findings print as:
+        ${printed.map(p => `<span class="fe-chip">${sanitizeInput(p)}</span>`).join('')}
+        ${layout.borrowedFrom
+          ? `<div class="fe-hint" style="margin-top:6px;">The template carries no section of its own for this area, so the report prints it under the ${sanitizeInput(layout.borrowedFrom)} layout.</div>`
+          : ''}
+      </div>
+    </div>
+
+    <div class="fe-section">
+      <div class="fe-section-title">The vulnerability</div>
+      ${feTextarea('Description', 'finding-description', s.description,
+                   'What the weakness is and where it was found.', 5)}
+      ${layoutHas(s.area, 'impact')
+        ? feTextarea('Impact', 'finding-impact', s.impact,
+                     'What it lets an attacker do, in business terms.', 4)
+        : ''}
+    </div>
+
+    <div class="fe-section">
+      <div class="fe-section-title">Rating &amp; target</div>
+      ${feField(sanitizeInput(layout.affected), 'finding-affected', s.affected,
+                'e.g. portal.example.com  /  10.0.4.12 (445)',
+                { mono: true, hint: 'Printed under this exact heading in the report, and as the affected host on the deck&rsquo;s scenario slide.' })}
+      ${layoutHas(s.area, 'attackVector')
+        ? feField('Attack Vector', 'finding-attack-vector', s.attackVector,
+                  'e.g. Network  /  Adjacent Network  /  Local',
+                  { hint: 'This layout prints an Attack Vector row and carries no CVSS vector to derive it from.' })
+        : ''}
+      ${layoutHas(s.area, 'cvss')
+        ? feField('CVSS v3.1 Vector', 'finding-cvss-vector', s.cvssVector,
+                  'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', { mono: true })
+        : ''}
+    </div>
+
+    ${layoutHas(s.area, 'poc') ? `
+    <div class="fe-section">
+      <div class="fe-section-title">Proof of concept</div>
+      <div class="fe-field">
+        <label for="finding-poc">Steps and proof</label>
+        <textarea class="input w-full" id="finding-poc" rows="7"
+                  placeholder="Request, response, commands - whatever proves it. Screenshots attached below are appended here."
+                  style="resize:vertical;font-family:var(--font-mono);font-size:12px;line-height:1.6;">${sanitizeInput(s.poc)}</textarea>
+        <div class="flex items-center gap-2" style="margin-top:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('poc-image-input').click()">&#8593; Upload screenshot</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="showEvidencePickerForPoc()">&#128206; From Evidence vault</button>
+          <span class="fe-hint" style="margin:0;">A finding only gets a scenario slide in the closing deck if it has a screenshot.</span>
+        </div>
+        <input type="file" id="poc-image-input" accept="image/*" style="display:none;" onchange="insertPocImage(this)">
+        <div id="finding-poc-evidence" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
+        <input type="hidden" id="finding-evidence-ids" value="${s.evidenceIds.join(',')}">
+      </div>
+    </div>` : `
+    <div class="fe-section">
+      <div class="fe-section-title">Proof of concept</div>
+      <div class="fe-hint" style="margin:0;">
+        The ${sanitizeInput(areaName)} layout prints no proof-of-concept row, so none is asked for here.
+        ${s.poc.trim() || s.evidenceIds.length
+          ? 'What is already attached to this finding is kept, and comes back if the area is changed to one that prints it.'
+          : ''}
+      </div>
+    </div>`}
+
+    <div class="fe-section">
+      <div class="fe-section-title">Recommendation</div>
+      ${feTextarea('How to fix it', 'finding-recommendation', s.recommendation,
+                   'The remediation the client is asked to carry out.', 4)}
+    </div>
+
+    <div class="fe-section">
+      <div class="fe-section-title">Recorded in mCollaborator</div>
+      <div class="fe-hint" style="margin:0 0 12px;">
+        Used by the findings list and the dashboards. Neither reaches the report:
+        the vulnerability register prints the title, exposure, rating, id and recommendation.
+      </div>
+      <div class="fe-grid-2">
+        ${feField('CVSS Score', 'finding-cvss', s.cvssScore, '0.0 - 10.0', { type: 'number', step: '0.1' })}
+        ${feField('CVE', 'finding-cve', s.cve, 'CVE-YYYY-NNNNN', { mono: true })}
+      </div>
+    </div>
+  `;
+}
+
+// changeFindingArea redraws the form for the newly chosen area, keeping
+// everything that has been typed - including the fields the new layout does not
+// print, which come back if the area is changed again.
+function changeFindingArea(code) {
+  captureFindingEditor();
+  findingEditorState.area = code;
+  const host = document.getElementById('fe-fields');
+  if (host) host.innerHTML = renderFindingFields();
+  renderPocEvidenceList();
+  updateFindingPreview();
+}
+
+// feValue reads one editor field from the captured state, trimmed, so an empty
+// field and a whitespace-only one look the same.
+function feValue(key) {
+  return ((findingEditorState && findingEditorState[key]) || '').trim();
 }
 
 // updateFindingPreview redraws the right-hand pane from the form as it stands.
 // It is called on every input and change event in the form, so an edit is
-// visible as it is made rather than only after a save.
+// visible as it is made rather than only after a save. It shows the rows this
+// area's report layout prints, and only those.
 function updateFindingPreview() {
   const host = document.getElementById('finding-preview');
-  if (!host) return;
+  if (!host || !findingEditorState) return;
+  captureFindingEditor();
 
-  const title = feValue('finding-title');
-  const severity = feValue('finding-severity') || 'info';
-  const areaCode = feValue('finding-category');
+  const areaCode = feValue('area');
+  const layout = areaLayout(areaCode);
   const area = REPORT_AREAS.find(a => a.code === areaCode);
-  const score = feValue('finding-cvss');
-  const vector = feValue('finding-cvss-vector');
-  const cve = feValue('finding-cve');
-  const affected = feValue('finding-affected');
-  const status = feValue('finding-status');
+  const title = feValue('title');
+  const severity = feValue('severity') || 'info';
+  const status = feValue('status');
 
-  // An empty section is shown as a grey "nothing here yet" line rather than
-  // dropped, so the preview doubles as a checklist of what is still missing.
   const block = (heading, text) => `
     <div class="fe-pv-block">
       <h3>${heading}</h3>
@@ -771,6 +922,10 @@ function updateFindingPreview() {
 
   const severityLabel = (FINDING_SEVERITIES.find(x => x.value === severity) || { label: severity }).label;
 
+  const meta = [['Rating', sanitizeInput(severityLabel)],
+                [layout.affected, sanitizeInput(feValue('affected'))]];
+  if (layoutHas(areaCode, 'attackVector')) meta.push(['Attack Vector', sanitizeInput(feValue('attackVector'))]);
+
   host.innerHTML = `
     <div class="fe-pv-head">
       <div class="flex items-center gap-2 mb-2" style="flex-wrap:wrap;">
@@ -780,26 +935,27 @@ function updateFindingPreview() {
       </div>
       <h1>${sanitizeInput(title) || '<span class="fe-pv-empty">Untitled finding</span>'}</h1>
       <dl class="fe-pv-meta">
-        <div><dt>Affected</dt><dd>${sanitizeInput(affected) || '<span class="fe-pv-empty">not set</span>'}</dd></div>
-        <div><dt>CVSS</dt><dd>${sanitizeInput(score) || '<span class="fe-pv-empty">not set</span>'}${cve ? ' &middot; ' + sanitizeInput(cve) : ''}</dd></div>
+        ${meta.map(([k, v]) => `<div><dt>${sanitizeInput(k)}</dt><dd>${v || '<span class="fe-pv-empty">not set</span>'}</dd></div>`).join('')}
       </dl>
-      ${vector ? `<code class="fe-pv-vector">${sanitizeInput(vector)}</code>` : ''}
+      ${layoutHas(areaCode, 'cvss') && feValue('cvssVector')
+        ? `<code class="fe-pv-vector">${sanitizeInput(feValue('cvssVector'))}</code>` : ''}
     </div>
-    ${block('Description', feValue('finding-description'))}
-    ${block('Impact', feValue('finding-impact'))}
+    ${block('Description', feValue('description'))}
+    ${layoutHas(areaCode, 'impact') ? block('Impact', feValue('impact')) : ''}
+    ${layoutHas(areaCode, 'poc') ? `
     <div class="fe-pv-block">
       <h3>Proof of Concept</h3>
       <div class="fe-pv-poc" id="fe-pv-poc"></div>
-    </div>
-    ${block('Recommendation', feValue('finding-recommendation'))}
+    </div>` : ''}
+    ${block('Recommendation', feValue('recommendation'))}
   `;
 
   // The PoC carries the <img> tags that attaching evidence inserts, so it is the
   // one field rendered as markup - exactly as the finding detail page renders
   // it, and exactly as it reaches the report.
   const poc = document.getElementById('fe-pv-poc');
-  const pocText = feValue('finding-poc');
   if (poc) {
+    const pocText = feValue('poc');
     poc.innerHTML = pocText
       ? pocText
       : '<p class="fe-pv-empty">No proof attached yet - a finding without a screenshot gets no scenario slide in the closing deck.</p>';
@@ -810,36 +966,45 @@ function updateFindingPreview() {
 }
 
 // Save the finding editor form to the current engagement via the API.
+//
+// The payload is built from findingEditorState rather than from the inputs on
+// screen. The fields shown depend on the area, so reading the DOM would send an
+// empty impact for a configuration review and quietly wipe what was written
+// while the finding was filed under a layout that prints one.
 async function saveFindingFromEditor() {
   const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) {
     showToast('No engagement selected. Open a project first.', 'error');
     return;
   }
-  const title = document.getElementById('finding-title')?.value || '';
-  if (!title.trim()) {
+  captureFindingEditor();
+  const s = findingEditorState;
+  if (!s || !(s.title || '').trim()) {
     showToast('Finding title is required', 'error');
     return;
   }
   const payload = {
-    title: title,
-    description: document.getElementById('finding-description')?.value || '',
-    impact: document.getElementById('finding-impact')?.value || '',
-    cvss_vector: document.getElementById('finding-cvss-vector')?.value || '',
-    cvss_score: parseFloat(document.getElementById('finding-cvss')?.value) || 0,
-    cve: document.getElementById('finding-cve')?.value || '',
-    severity: document.getElementById('finding-severity')?.value || 'info',
+    title: s.title,
+    description: s.description,
+    impact: s.impact,
+    cvss_vector: s.cvssVector,
+    cvss_score: parseFloat(s.cvssScore) || 0,
+    cve: s.cve,
+    severity: s.severity || 'info',
     // The category is the assessment area the finding is reported under, so it
-    // decides its section, its vulnerability id and its bar in the
-    // findings-by-area chart when the report is generated.
-    category: document.getElementById('finding-category')?.value || '',
-    // The host or endpoint the finding was proved on. It prints as the affected
-    // host on the deck's scenario slide, so it has to be stored, not just typed.
-    affected_system: document.getElementById('finding-affected')?.value || '',
-    status: document.getElementById('finding-status')?.value || 'open',
-    poc: document.getElementById('finding-poc')?.value || '',
-    remediation: document.getElementById('finding-recommendation')?.value || '',
-    evidence_ids: getPocEvidenceIds()
+    // decides its section, its vulnerability id, which fields the editor asks
+    // for, and its bar in the findings-by-area chart when the report is
+    // generated.
+    category: s.area || '',
+    // The host, device, domain or SSID the finding was proved on - the template
+    // labels this row differently in every section, but it is one field.
+    affected_system: s.affected,
+    // Printed by the IPT, ADT and WNA layouts, which is where it is asked for.
+    attack_vector: s.attackVector,
+    status: s.status || 'open',
+    poc: s.poc,
+    remediation: s.recommendation,
+    evidence_ids: s.evidenceIds || []
   };
   try {
     const isEdit = !!MCOLLABORATOR.currentFinding?.id;
@@ -952,13 +1117,23 @@ const REPORT_AREAS = [
 
 const REPORT_WIZARD_STEPS = 5;
 
+// The role the template prints under an author's name. It is literal text in
+// the document rather than a placeholder, so it is what an author who is given
+// no title of their own keeps.
+const DEFAULT_AUTHOR_TITLE = 'Cybersecurity Expert';
+
 function emptyReportWizardState() {
   return {
     step: 1,
     companyName: '', companyInitials: '', logo: '',
     projectName: 'VAPT Report', refNumber: '', versionLabel: 'Details to be Provided',
     reportDate: '', assessmentStart: '', assessmentEnd: '',
-    testerName: '', approverName: '', approverTitle: '',
+    // The cover table has two author rows. It used to be filled from one name,
+    // which printed the same person twice; they are separate people now, and a
+    // blank second author leaves the second row out of the report altogether.
+    testerName: '', testerTitle: DEFAULT_AUTHOR_TITLE,
+    secondAuthorName: '', secondAuthorTitle: DEFAULT_AUTHOR_TITLE,
+    approverName: '', approverTitle: '',
     areas: {},              // code -> scope text, presence means "selected"
     outOfScope: '', tools: '',
     findings: [], allFindings: [],
@@ -984,7 +1159,8 @@ let reportWizardState = emptyReportWizardState();
 function hasReportWizardDraft() {
   const s = reportWizardState;
   const typed = ['companyName', 'companyInitials', 'refNumber', 'reportDate', 'assessmentStart',
-                 'assessmentEnd', 'testerName', 'approverName', 'approverTitle', 'outOfScope', 'tools', 'logo']
+                 'assessmentEnd', 'testerName', 'secondAuthorName', 'approverName', 'approverTitle',
+                 'outOfScope', 'tools', 'logo']
     .some(k => (s[k] || '').trim() !== '');
   return s.step > 1 || typed || Object.keys(s.areas).length > 0 || s.findings.length > 0;
 }
@@ -1067,9 +1243,22 @@ function renderReportStep1() {
       ${wizardField('Report Date', 'wizard-report-date', 'reportDate', 'e.g. 12th August 2026')}
       ${wizardField('Assessment Start', 'wizard-start', 'assessmentStart', 'e.g. 17th June 2026')}
       ${wizardField('Assessment End', 'wizard-end', 'assessmentEnd', 'e.g. 24th June 2026')}
-      ${wizardField('Tester Name (Author)', 'wizard-tester', 'testerName', 'Name of Tester')}
-      ${wizardField('Approver Name', 'wizard-approver', 'approverName', 'e.g. Jamal Mekdachi')}
-      ${wizardField('Approver Role', 'wizard-approver-title', 'approverTitle', 'e.g. VP, Operations')}
+    </div>
+    <div class="card p-4" style="margin-bottom:20px;">
+      <h4 class="font-semibold mb-1" style="font-size:14px;">Authors and approver</h4>
+      <p class="text-xs text-muted mb-3">
+        The cover table lists two authors, one above the other. Fill in the primary author;
+        leave the second blank and that row is left out of the report rather than repeating
+        the first name.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        ${wizardField('Primary Author <span style="color:var(--critical)">*</span>', 'wizard-tester', 'testerName', 'Name of the lead tester')}
+        ${wizardField('Primary Author Role', 'wizard-tester-title', 'testerTitle', DEFAULT_AUTHOR_TITLE)}
+        ${wizardField('Second Author', 'wizard-second-author', 'secondAuthorName', 'Optional — leave blank for one author')}
+        ${wizardField('Second Author Role', 'wizard-second-author-title', 'secondAuthorTitle', DEFAULT_AUTHOR_TITLE)}
+        ${wizardField('Approver Name', 'wizard-approver', 'approverName', 'e.g. Jamal Mekdachi')}
+        ${wizardField('Approver Role', 'wizard-approver-title', 'approverTitle', 'e.g. VP, Operations')}
+      </div>
     </div>
     <div style="margin-bottom:20px;">
       <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">Client Logo</label>
@@ -1260,6 +1449,10 @@ function renderReportStep5() {
         <div style="font-size:13px;color:var(--text-muted);">
           <div class="mb-1"><strong>Company:</strong> ${sanitizeInput(reportWizardState.companyName) || 'Not specified'}</div>
           <div class="mb-1"><strong>Reference:</strong> ${sanitizeInput(reportWizardState.refNumber) || 'Not specified'}</div>
+          <div class="mb-1"><strong>Authors:</strong> ${
+            [reportWizardState.testerName, reportWizardState.secondAuthorName]
+              .map(n => (n || '').trim()).filter(Boolean).map(sanitizeInput).join(' and ') || 'Not specified'
+          }</div>
           <div class="mb-3"><strong>Total issues:</strong> ${reportWizardState.findings.length}</div>
           <div class="mb-2"><strong>Findings by severity</strong><br>${sevRow}</div>
           <div class="mb-1"><strong>Findings by area of assessment</strong></div>
@@ -1528,6 +1721,9 @@ function reportWizardPayload() {
     assessment_start: reportWizardState.assessmentStart,
     assessment_end: reportWizardState.assessmentEnd,
     tester_name: reportWizardState.testerName,
+    tester_title: reportWizardState.testerTitle,
+    second_author_name: reportWizardState.secondAuthorName,
+    second_author_title: reportWizardState.secondAuthorTitle,
     approver_name: reportWizardState.approverName,
     approver_title: reportWizardState.approverTitle,
     version_label: reportWizardState.versionLabel,
@@ -2658,11 +2854,7 @@ function afterRenderFindingEditor() {
   const form = document.getElementById('finding-editor-form');
   if (!form) return;
 
-  const f = MCOLLABORATOR.currentFinding;
-  if (f && Array.isArray(f.evidence_ids) && f.evidence_ids.length) {
-    setPocEvidenceIds(f.evidence_ids);
-    renderPocEvidenceList();
-  }
+  renderPocEvidenceList();
 
   form.addEventListener('input', updateFindingPreview);
   form.addEventListener('change', updateFindingPreview);

@@ -207,6 +207,7 @@ func renderDocumentBody(doc string, config ReportConfig, findings []numberedFind
 	doc = healPlaceholderRuns(doc)
 
 	doc = fixClientCompanyBookmark(doc)
+	doc = renderAuthors(doc, config)
 	doc = renderCoverTable(doc)
 	doc = renderTableOfContents(doc, config)
 	doc = renderScopeTable(doc, config)
