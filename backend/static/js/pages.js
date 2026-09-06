@@ -429,31 +429,70 @@ async function afterRenderLedgerDashboard() {
 }
 
 // -------- LEDGER: PROJECT LEDGER --------
+// -------- PROJECT WORKSPACE --------
+//
+// Findings grouped by the assessment area they will be reported under, rather
+// than one flat list. A project's findings are read in order to answer two
+// questions - what did we find, and is it ready to go in the report - and the
+// flat list answered neither: it could not show how a section was shaping up,
+// and it never said that a finding had no evidence, which is only discovered
+// when its scenario slide is missing from the closing deck.
+
+// projectView holds what the page is showing. Filters and collapsed groups live
+// here so they survive a refresh of the findings, which the poller does.
+let projectView = {
+  sev: 'all',
+  gaps: false,
+  closed: {},
+  findings: [],
+  eng: null,
+  targets: []
+};
+
+// findingReadiness is what the report and the deck need from a finding. Each is
+// something a generated document silently does without rather than complains
+// about, which is why they belong on the screen the findings are worked on.
+function findingReadiness(f) {
+  return [
+    { key: 'host', ok: !!((f.affected_system || f.node_id || '').trim()), label: 'affected host' },
+    { key: 'rec', ok: !!((f.remediation || '').trim()), label: 'recommendation' },
+    { key: 'evidence', ok: Array.isArray(f.evidence_ids) && f.evidence_ids.length > 0, label: 'evidence' }
+  ];
+}
+
+function findingIsComplete(f) {
+  return findingReadiness(f).every(c => c.ok);
+}
+
+const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
+
+function severityTint(sev, alpha) {
+  const hex = {
+    critical: '#EF4444', high: '#F59E0B', medium: '#3B82F6', low: '#22C55E', info: '#94A3B8'
+  }[sev] || '#94A3B8';
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+function severityBadgeStyle(sev) {
+  const hex = { critical: 'var(--critical)', high: 'var(--warning)', medium: '#3B82F6', low: '#22C55E', info: 'var(--muted)' }[sev] || 'var(--muted)';
+  return `color:${hex};background:${severityTint(sev, 0.15)};border:1px solid ${severityTint(sev, 0.3)};`;
+}
+
 function renderProjectLedger() {
   return `
-    <div class="split-pane" style="height:calc(100vh - 64px - 48px);margin:-24px;">
-      <div class="pane pane-left p-4">
-        <h4 class="font-display font-bold text-sm mb-4" style="text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);">Scope & Targets</h4>
-        <div id="project-nodes">
+    <div class="workspace" style="margin:-24px;">
+      <div id="ws-topbar"></div>
+      <div class="ws-split">
+        <div class="pane pane-left p-4" id="project-nodes">
           <div class="skeleton" style="height:32px;margin-bottom:8px;"></div>
           <div class="skeleton" style="height:32px;"></div>
         </div>
-      </div>
-      <div class="pane pane-center p-4">
-        <div class="flex items-center justify-between mb-4">
-          <h4 class="font-display font-bold">Findings</h4>
-          ${canWriteFindings() ? `
-            <button class="btn btn-sm btn-ghost" onclick="showBulkImportModal()">+ Bulk Import</button>
-            <button class="btn btn-primary" onclick="MCOLLABORATOR.currentFinding=null;MCOLLABORATOR.navigate('#/finding-editor')">+ New Finding</button>` : ''}
+        <div class="ws-main" id="project-findings">
+          <div class="skeleton" style="height:80px;margin-bottom:12px;"></div>
+          <div class="skeleton" style="height:80px;"></div>
         </div>
-        <div id="project-findings">
-          <div class="skeleton" style="height:60px;margin-bottom:8px;"></div>
-          <div class="skeleton" style="height:60px;"></div>
-        </div>
-      </div>
-      <div class="pane pane-right p-4">
-        <h4 class="font-display font-bold text-sm mb-4" style="text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);">Project Details</h4>
-        <div id="project-meta">
+        <div class="pane pane-right p-4" id="project-meta">
           <div class="skeleton" style="height:100px;"></div>
         </div>
       </div>
@@ -464,85 +503,252 @@ function renderProjectLedger() {
 async function afterRenderProjectLedger() {
   const engId = MCOLLABORATOR.currentEngagement?.id;
   if (!engId) {
-    ['project-nodes','project-findings','project-meta'].forEach(id => {
+    ['project-nodes', 'project-findings', 'project-meta'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = '<p class="text-muted text-sm">No engagement selected.</p>';
     });
+    const bar = document.getElementById('ws-topbar');
+    if (bar) bar.innerHTML = '';
     return;
   }
   try {
-    const engId = MCOLLABORATOR.currentEngagement.id;
     const [nodesRes, findingsRes, engRes] = await Promise.all([
       api.get(`/engagements/${engId}/nodes`),
       api.get(`/engagements/${engId}/findings`),
       api.get(`/engagements/${engId}`)
     ]);
     const nodes = nodesRes.data || [];
-    const findings = findingsRes.data || [];
     const eng = engRes.data || MCOLLABORATOR.currentEngagement || {};
 
-    // The scope pane prefers persisted Node records, but falls back to the
-    // engagement's scope list so targets entered at creation always show up.
-    const scopeTargets = nodes.length
-      ? nodes.map(n => `<div class="flex items-center gap-2 px-2 py-2" style="cursor:pointer;border-radius:var(--radius);font-family:var(--font-mono);font-size:13px;hover:background:var(--surface-hover);" onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background=''">
-        <span style="font-size:14px;color:${MCOLLABORATOR.theme==='cyberpunk'?'var(--primary)':MCOLLABORATOR.theme==='ledger'?'var(--primary)':'var(--muted)'};">●</span>
-        ${sanitizeInput(n.target)}
-        <span class="text-xs text-muted">(${sanitizeInput(n.type || '')})</span>
-      </div>`)
-      : (eng.scope?.included || []).map(t => `<div class="flex items-center gap-2 px-2 py-2" style="font-family:var(--font-mono);font-size:13px;">
-        <span style="font-size:14px;color:var(--muted);">●</span>
-        ${sanitizeInput(t)}
-      </div>`);
+    projectView.findings = findingsRes.data || [];
+    projectView.eng = eng;
+    // The scope pane prefers persisted Node records but falls back to the
+    // engagement's own scope list, so targets entered at creation still show.
+    projectView.targets = nodes.length
+      ? nodes.map(n => ({ label: n.target, note: n.type || '' }))
+      : (eng.scope?.included || []).map(t => ({ label: t, note: '' }));
 
-    document.getElementById('project-nodes').innerHTML =
-      scopeTargets.length ? scopeTargets.join('') : '<p class="text-sm text-muted">No scope defined.</p>';
-
-    document.getElementById('project-findings').innerHTML = findings.map(f => `
-      <div class="flex items-start gap-3 p-3 card mb-2" style="cursor:pointer;" onclick="MCOLLABORATOR.navigate('#/finding-detail',{finding:${JSON.stringify(f).replace(/"/g,'&quot;')}})">
-        <div class="badge-severity ${f.severity}" style="flex-shrink:0;width:48px;text-align:center;">${f.cvss_score||''}</div>
-        <div class="flex-1">
-          <div class="flex items-center justify-between">
-            <h5 class="font-semibold" style="font-size:13px;">${f.title}</h5>
-            <span class="status-pill ${f.status}" style="font-size:10px;height:20px;">${f.status}</span>
-          </div>
-          <div class="flex items-center gap-3 text-xs text-muted mt-1">
-            <span>${f.created_by ? 'Analyst' : 'System'}</span>
-            <span>${timeAgo(f.created_at)}</span>
-            ${f.cve ? `<span class="font-mono" style="font-size:11px;">${f.cve}</span>` : ''}
-          </div>
-        </div>
-      </div>
-    `).join('');
-    
-    document.getElementById('project-meta').innerHTML = `
-      <dl style="font-size:13px;">
-        <dt style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Client</dt>
-        <dd class="font-semibold mb-3">${eng.client_name || 'N/A'}</dd>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-          <div>
-            <dt style="color:var(--muted);font-size:11px;text-transform:uppercase;">Start</dt>
-            <dd class="font-mono" style="font-size:12px;">${eng.timeline?.start_date || 'N/A'}</dd>
-          </div>
-          <div>
-            <dt style="color:var(--muted);font-size:11px;text-transform:uppercase;">End</dt>
-            <dd class="font-mono" style="font-size:12px;">${eng.timeline?.end_date || 'N/A'}</dd>
-          </div>
-        </div>
-        <dt style="color:var(--muted);font-size:11px;text-transform:uppercase;">Methodology</dt>
-        <dd class="text-sm mb-3">${(eng.methodology || 'N/A').toUpperCase()}</dd>
-        <dt style="color:var(--muted);font-size:11px;text-transform:uppercase;">Status</dt>
-        <dd><span class="status-pill ${eng.status}">${eng.status || 'N/A'}</span></dd>
-      </dl>
-      ${isAdmin() && !(eng.status === 'closed' || eng.status === 'completed') ? `
-        <button class="btn btn-primary btn-sm w-full mt-4" onclick="markEngagementCompleted('${eng.id}')">Mark Completed</button>` : ''}
-    `;
+    paintWorkspace();
   } catch (e) {
-    ['project-nodes','project-findings','project-meta'].forEach(id => {
+    ['project-nodes', 'project-findings', 'project-meta'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = '<p class="text-muted text-sm">Failed to load.</p>';
     });
   }
-    if (engId) startFindingsPolling(engId);
+  startFindingsPolling(engId);
+}
+
+// paintWorkspace redraws from projectView. Filtering and collapsing go through
+// it rather than re-fetching.
+function paintWorkspace() {
+  const eng = projectView.eng || {};
+  const findings = projectView.findings;
+
+  const areasPresent = new Set(findings.map(f => normalizeAreaCode(f.category)).filter(Boolean));
+  const bar = document.getElementById('ws-topbar');
+  if (bar) {
+    bar.innerHTML = `
+      <div class="ws-topbar">
+        <div style="min-width:0;">
+          <div class="flex items-center gap-3 mb-1">
+            <h2 class="font-display font-bold" style="font-size:20px;letter-spacing:-0.2px;">${sanitizeInput(eng.client_name || eng.name || 'Project')}</h2>
+            <span class="status-pill ${sanitizeInput(eng.status || 'open')}">${sanitizeInput(eng.status || '')}</span>
+          </div>
+          <div class="ws-meta">
+            <span>${sanitizeInput(eng.name || '')}</span>
+            ${eng.timeline?.start_date ? `<span class="ws-sep">|</span><span>${sanitizeInput(eng.timeline.start_date)} &ndash; ${sanitizeInput(eng.timeline.end_date || '')}</span>` : ''}
+            <span class="ws-sep">|</span>
+            <span>${findings.length} finding${findings.length === 1 ? '' : 's'} across ${areasPresent.size} area${areasPresent.size === 1 ? '' : 's'}</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2" style="flex-shrink:0;">
+          ${canWriteFindings() ? `
+            <button class="btn btn-secondary" onclick="showBulkImportModal()">&#8593; Import findings</button>
+            <button class="btn btn-secondary" onclick="MCOLLABORATOR.currentFinding=null;MCOLLABORATOR.navigate('#/finding-editor')">+ New finding</button>` : ''}
+          <button class="btn btn-primary" onclick="MCOLLABORATOR.navigate('#/reports')">Generate report</button>
+        </div>
+      </div>`;
+  }
+
+  const scope = document.getElementById('project-nodes');
+  if (scope) {
+    scope.innerHTML = `
+      <h4 class="eyebrow mb-4" style="padding-bottom:8px;border-bottom:1px solid var(--border);">Scope &amp; targets</h4>
+      ${projectView.targets.length
+        ? `<div class="flex flex-col gap-2">${projectView.targets.map(t => `
+            <div class="flex items-center gap-2" style="font-family:var(--font-mono);font-size:12px;padding:2px 0;">
+              <span style="color:var(--muted);">&#9679;</span>
+              <span style="min-width:0;word-break:break-all;">${sanitizeInput(t.label)}</span>
+              ${t.note ? `<span class="text-xs text-muted">(${sanitizeInput(t.note)})</span>` : ''}
+            </div>`).join('')}</div>`
+        : '<p class="text-sm text-muted">No scope defined.</p>'}`;
+  }
+
+  paintWorkspaceFindings();
+
+  const meta = document.getElementById('project-meta');
+  if (meta) {
+    const total = findings.length || 1;
+    const counts = {
+      host: findings.filter(f => findingReadiness(f)[0].ok).length,
+      rec: findings.filter(f => findingReadiness(f)[1].ok).length,
+      evidence: findings.filter(f => findingReadiness(f)[2].ok).length
+    };
+    const meter = (n, tone) => `<div class="ws-meter"><span style="width:${Math.round(n / total * 100)}%;background:${tone};"></span></div>`;
+    const row = (label, n, tone, note) => `
+      <div>
+        <div class="flex items-baseline justify-between" style="margin-bottom:5px;">
+          <span style="font-size:12px;">${label}</span>
+          <span class="font-mono" style="font-size:11px;color:${tone};">${n} of ${findings.length}</span>
+        </div>
+        ${meter(n, tone)}
+        <div class="text-xs text-muted" style="margin-top:5px;line-height:1.6;">${note}</div>
+      </div>`;
+    const tone = n => (findings.length && n === findings.length) ? '#22C55E' : 'var(--warning)';
+
+    meta.innerHTML = `
+      <h4 class="eyebrow mb-4" style="padding-bottom:8px;border-bottom:1px solid var(--border);">Report readiness</h4>
+      ${findings.length ? `<div class="flex flex-col gap-3 mb-6">
+        ${row('Affected host recorded', counts.host, tone(counts.host), 'Printed as the affected row in every section.')}
+        ${row('Recommendation written', counts.rec, tone(counts.rec), 'A blank one prints as an empty row.')}
+        ${row('Evidence attached', counts.evidence, tone(counts.evidence), 'Only these get a scenario slide in the closing deck.')}
+      </div>` : '<p class="text-sm text-muted mb-6">No findings yet.</p>'}
+
+      <h4 class="eyebrow mb-4" style="padding-bottom:8px;border-bottom:1px solid var(--border);">Project</h4>
+      <div class="flex flex-col gap-3">
+        ${[['Client', eng.client_name], ['Methodology', (eng.methodology || '').toUpperCase()],
+           ['Start', eng.timeline?.start_date], ['End', eng.timeline?.end_date]]
+          .filter(([, v]) => v)
+          .map(([k, v]) => `<div>
+            <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.6px;margin-bottom:2px;">${k}</div>
+            <div style="font-size:13px;">${sanitizeInput(String(v))}</div>
+          </div>`).join('')}
+      </div>
+      ${isAdmin() && !(eng.status === 'closed' || eng.status === 'completed') ? `
+        <button class="btn btn-secondary btn-sm w-full mt-4" onclick="markEngagementCompleted('${eng.id}')">Mark completed</button>` : ''}`;
+  }
+}
+
+function setWorkspaceSeverity(sev) {
+  projectView.sev = projectView.sev === sev ? 'all' : sev;
+  paintWorkspaceFindings();
+}
+
+function toggleWorkspaceGaps() {
+  projectView.gaps = !projectView.gaps;
+  paintWorkspaceFindings();
+}
+
+function toggleWorkspaceGroup(code) {
+  projectView.closed[code] = !projectView.closed[code];
+  paintWorkspaceFindings();
+}
+
+function paintWorkspaceFindings() {
+  const host = document.getElementById('project-findings');
+  if (!host) return;
+  const findings = projectView.findings;
+
+  if (!findings.length) {
+    host.innerHTML = `
+      <div class="card" style="padding:56px 24px;text-align:center;">
+        <div style="font-size:32px;margin-bottom:10px;">&#128269;</div>
+        <h3 class="font-display font-bold mb-2">No findings yet</h3>
+        <p class="text-sm text-muted" style="max-width:460px;margin:0 auto 20px;">
+          Record them one at a time, or read them out of a report you already have &mdash; a DOCX or PDF.
+        </p>
+        ${canWriteFindings() ? `<button class="btn btn-primary" onclick="showBulkImportModal()">Import from a report</button>` : ''}
+      </div>`;
+    return;
+  }
+
+  const counts = { all: findings.length };
+  SEVERITY_ORDER.forEach(s => { counts[s] = findings.filter(f => (f.severity || 'info') === s).length; });
+  const gapCount = findings.filter(f => !findingIsComplete(f)).length;
+
+  const visible = findings.filter(f =>
+    (projectView.sev === 'all' || (f.severity || 'info') === projectView.sev) &&
+    (!projectView.gaps || !findingIsComplete(f)));
+
+  const chip = (key, label, count, pressed) => `
+    <button class="ws-chip" aria-pressed="${pressed}" onclick="setWorkspaceSeverity('${key}')">
+      ${label}<span class="n">${count}</span>
+    </button>`;
+
+  const chips = [chip('all', 'All', counts.all, projectView.sev === 'all')]
+    .concat(SEVERITY_ORDER.filter(s => counts[s] > 0)
+      .map(s => chip(s, s === 'info' ? 'Informational' : s.charAt(0).toUpperCase() + s.slice(1), counts[s], projectView.sev === s)))
+    .join('');
+
+  // Groups in template order, then anything whose category maps to no area.
+  const codes = REPORT_AREAS.map(a => a.code)
+    .filter(code => findings.some(f => normalizeAreaCode(f.category) === code));
+  const strays = findings.filter(f => !normalizeAreaCode(f.category));
+
+  const groupHtml = (code, label, all, items) => {
+    const open = !projectView.closed[code];
+    const dots = SEVERITY_ORDER
+      .map(s => ({ s, n: all.filter(f => (f.severity || 'info') === s).length }))
+      .filter(d => d.n > 0)
+      .map(d => `<span class="badge-severity ${d.s === 'info' ? 'info' : d.s}" style="min-width:20px;justify-content:center;">${d.n}</span>`)
+      .join('');
+
+    const rows = items.map(f => {
+      const checks = findingReadiness(f).map(c =>
+        `<span class="ws-check ${c.ok ? 'ok' : 'gap'}">${c.ok ? '&#10003;' : '&#8213;'} ${c.label}</span>`).join('');
+      const sev = f.severity || 'info';
+      return `
+        <div class="ws-row" onclick="MCOLLABORATOR.navigate('#/finding-detail',{finding:${JSON.stringify(f).replace(/"/g, '&quot;')}})">
+          <div class="ws-score" style="${severityBadgeStyle(sev)}">${f.cvss_score ? sanitizeInput(String(f.cvss_score)) : '&mdash;'}</div>
+          <div style="flex:1;min-width:0;">
+            <div class="flex items-center gap-2" style="flex-wrap:wrap;">
+              <span style="font-size:13px;font-weight:600;">${sanitizeInput(f.title || '')}</span>
+              <span class="badge-severity ${sev === 'info' ? 'info' : sev}">${sev}</span>
+            </div>
+            <div class="ws-host">${sanitizeInput(f.affected_system || f.node_id || '') || 'No affected host recorded'}</div>
+            <div class="flex gap-2" style="flex-wrap:wrap;">${checks}</div>
+          </div>
+          <span class="status-pill ${sanitizeInput(f.status || 'open')}" style="flex-shrink:0;height:22px;font-size:10px;">${sanitizeInput(f.status || '')}</span>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="ws-group" data-open="${open}">
+        <button class="ws-group-head" onclick="toggleWorkspaceGroup('${code}')">
+          <span class="ws-chev">&#9656;</span>
+          <span class="font-display" style="font-size:14px;font-weight:600;">${sanitizeInput(label)}</span>
+          ${code === '_none' ? '' : `<span class="ws-code">${code}</span>`}
+          <span style="flex:1;"></span>
+          <span class="flex gap-1">${dots}</span>
+          <span class="text-xs text-muted" style="min-width:78px;text-align:right;">${all.length} finding${all.length === 1 ? '' : 's'}</span>
+        </button>
+        <div class="ws-group-body">
+          ${rows || '<div class="ws-row-empty">Nothing matches the filter in this area.</div>'}
+        </div>
+      </div>`;
+  };
+
+  const groups = codes.map(code => {
+    const area = REPORT_AREAS.find(a => a.code === code);
+    return groupHtml(code, area.label, findings.filter(f => normalizeAreaCode(f.category) === code),
+      visible.filter(f => normalizeAreaCode(f.category) === code));
+  }).join('');
+
+  const strayGroup = strays.length
+    ? groupHtml('_none', 'No assessment area set', strays, visible.filter(f => !normalizeAreaCode(f.category)))
+    : '';
+
+  host.innerHTML = `
+    <div class="ws-filters">
+      <div class="flex gap-2" style="flex-wrap:wrap;">${chips}</div>
+      <button class="ws-chip" aria-pressed="${projectView.gaps}" onclick="toggleWorkspaceGaps()">
+        &#9888; ${projectView.gaps ? `Showing ${gapCount} needing attention` : `${gapCount} need attention`}
+      </button>
+    </div>
+    ${strays.length ? `<div class="ws-warn mb-4">
+        ${strays.length} finding${strays.length === 1 ? ' has' : 's have'} no assessment area, so ${strays.length === 1 ? 'it' : 'they'} would not print in any section of the report.
+      </div>` : ''}
+    <div class="flex flex-col gap-3">${strayGroup}${groups}</div>`;
 }
 
 // Transition an active project to "completed" so it moves off the active list
@@ -2284,60 +2490,514 @@ function onDragStart(event, findingId) {
 }
 
 // -------- BULK IMPORT FINDINGS --------
+// -------- IMPORTING FINDINGS --------
+//
+// Two ways in, one way through. A DOCX or PDF is read by the server, a pasted
+// JSON array is read here, and both land on the same review screen: the import
+// is only as good as the assessment area each finding ends up under, and nothing
+// but a person can settle that when the document did not say.
+
 let bulkImportEngagementId = null;
+
+// importState is the modal's own state. extraction is what the review screen
+// works on and outlives the modal.
+let importState = { tab: 'doc', phase: 'idle', error: '' };
+let extraction = null;
+
+const IMPORT_MAX_MB = 25;
 
 function showBulkImportModal() {
   if (!MCOLLABORATOR.currentEngagement?.id) { showToast('No engagement selected', 'error'); return; }
   bulkImportEngagementId = MCOLLABORATOR.currentEngagement.id;
-  
+  importState = { tab: 'doc', phase: 'idle', error: '' };
+
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.className = 'modal-overlay';
   overlay.id = 'bulk-import-overlay';
-  overlay.innerHTML = `
-    <div class="card" style="width:90%;max-width:700px;max-height:80vh;overflow-y:auto;">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="font-display font-bold">Bulk Import Findings</h3>
-        <button class="btn btn-ghost text-sm" onclick="document.getElementById('bulk-import-overlay').remove()">✕</button>
-      </div>
-      <p class="text-xs text-muted mb-2">Paste a JSON array of findings below. Each finding must have: title, severity, description. Optional: cve, node_id, cvss_vector, cvss_score, status, poc, remediation, impact, likelihood, assigned_to.</p>
-      <textarea id="bulk-import-json" class="input w-full font-mono" style="min-height:300px;font-size:12px;" placeholder='[
-  {"title":"SQL Injection","severity":"critical","description":"SQL injection in login","status":"open","category":"web"},
-  {"title":"XSS Vulnerability","severity":"high","description":"Stored XSS in profile","status":"open","category":"web"}
-]'></textarea>
-      <div class="flex justify-end gap-2 mt-4">
-        <button class="btn btn-ghost" onclick="document.getElementById('bulk-import-overlay').remove()">Cancel</button>
-        <button class="btn btn-primary" onclick="doBulkImport()">Import Findings</button>
-      </div>
-    </div>
-  `;
+  overlay.innerHTML = '<div class="modal" style="width:720px;" id="import-modal"></div>';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeImportModal(); });
   document.body.appendChild(overlay);
+  paintImportModal();
 }
 
-async function doBulkImport() {
-  const textarea = document.getElementById('bulk-import-json');
-  if (!textarea) return;
-  let findings;
-  try {
-    findings = JSON.parse(textarea.value);
-    if (!Array.isArray(findings)) throw new Error('Must be an array');
-  } catch (e) {
-    showToast('Invalid JSON: ' + e.message, 'error');
+function closeImportModal() {
+  const el = document.getElementById('bulk-import-overlay');
+  if (el) el.remove();
+}
+
+function setImportTab(tab) {
+  importState.tab = tab;
+  importState.error = '';
+  paintImportModal();
+}
+
+function paintImportModal() {
+  const host = document.getElementById('import-modal');
+  if (!host) return;
+  const doc = importState.tab === 'doc';
+  const s = importState;
+
+  let body = '';
+  if (!doc) {
+    body = `
+      <p class="text-sm text-muted mb-3" style="line-height:1.7;">
+        A JSON array of findings. Each needs <span class="font-mono" style="color:var(--text);">title</span>,
+        <span class="font-mono" style="color:var(--text);">severity</span> and
+        <span class="font-mono" style="color:var(--text);">description</span>; everything else is optional.
+        Set <span class="font-mono" style="color:var(--text);">category</span> to an area code to place a finding yourself.
+      </p>
+      <textarea id="bulk-import-json" class="input w-full font-mono" style="min-height:260px;font-size:12px;line-height:1.7;"
+        placeholder='[
+  {"title":"SMB signing not required","severity":"high","category":"IPT",
+   "description":"Unsigned SMB accepted.","remediation":"Require SMB signing."}
+]'></textarea>
+      <div class="text-xs text-muted mt-2">Pasted findings go through the same review step.</div>`;
+  } else if (s.phase === 'busy') {
+    body = `
+      <div class="import-file">
+        <span style="color:var(--primary);font-size:26px;line-height:1;">&#128196;</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;">${sanitizeInput(s.filename || '')}</div>
+          <div class="font-mono text-xs text-muted">${sanitizeInput(s.size || '')}</div>
+        </div>
+        <span class="font-mono text-xs" style="color:var(--primary);">Reading&hellip;</span>
+      </div>
+      <div class="import-sweep mt-4"><i></i></div>
+      <div class="text-xs text-muted mt-4" style="line-height:1.7;">
+        Reading the document structure, finding the vulnerability blocks, then sorting them into assessment areas.
+      </div>`;
+  } else if (s.phase === 'done') {
+    const r = extraction || {};
+    const total = (r.findings || []).length;
+    const byArea = r.by_area || {};
+    const max = Math.max(1, ...Object.values(byArea), r.unplaced || 0);
+    const rows = REPORT_AREAS.filter(a => byArea[a.code])
+      .map(a => ({ code: a.code, n: byArea[a.code], note: 'from the report', low: false }))
+      .concat((r.unplaced || 0) > 0 ? [{ code: '&mdash;', n: r.unplaced, note: 'no clear match', low: true }] : []);
+
+    body = `
+      <div class="import-file" style="border-color:rgba(34,197,94,0.3);">
+        <span style="color:#22C55E;font-size:26px;line-height:1;">&#128196;</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;">${sanitizeInput(r.filename || '')}</div>
+          <div class="font-mono text-xs text-muted">
+            ${total} finding${total === 1 ? '' : 's'} read${(r.unplaced || 0) > 0 ? ` &middot; ${r.unplaced} need a second look` : ''}
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="resetImport()">Replace</button>
+      </div>
+      ${rows.length ? `
+        <div class="mt-4">
+          <div class="eyebrow mb-3">How they sorted</div>
+          <div class="flex flex-col gap-2">
+            ${rows.map(b => `
+              <div class="import-bucket">
+                <span class="code" style="color:${b.low ? 'var(--warning)' : 'var(--text)'};">${b.code}</span>
+                <div class="track"><span style="width:${Math.round(b.n / max * 100)}%;background:${b.low ? 'rgba(245,158,11,0.55)' : 'var(--primary)'};"></span></div>
+                <span class="note">${b.n} &middot; ${b.note}</span>
+              </div>`).join('')}
+          </div>
+        </div>` : ''}
+      ${(r.notes || []).map(n => `<div class="import-note mt-4">${sanitizeInput(n)}</div>`).join('')}`;
+  } else {
+    body = `
+      <div class="dropzone" id="import-dropzone" onclick="document.getElementById('import-file-input').click()">
+        <div style="font-size:30px;margin-bottom:8px;">&#8593;</div>
+        <p class="font-display font-bold" style="font-size:16px;">Drop a report here</p>
+        <p class="text-sm text-muted">or click to browse &middot; DOCX or PDF only, up to ${IMPORT_MAX_MB}&nbsp;MB</p>
+        <input type="file" id="import-file-input" accept=".docx,.pdf" style="display:none;" onchange="handleImportFile(this.files)">
+      </div>
+      <div class="import-note mt-4">
+        Findings are read out of the document and sorted into assessment areas by their section headings, and by
+        the wording of each finding where a heading does not say.
+        <span style="color:var(--text);">Nothing is saved until you have reviewed the sorting.</span>
+      </div>`;
+  }
+
+  const ready = doc ? importState.phase === 'done' : true;
+  host.innerHTML = `
+    <div class="modal-header">
+      <h3>Import findings</h3>
+      <button class="btn btn-ghost text-sm" onclick="closeImportModal()">&#10005;</button>
+    </div>
+    <div class="import-tabs">
+      <button class="tab-btn ${doc ? 'tab-btn-active' : ''}" onclick="setImportTab('doc')">From a document</button>
+      <button class="tab-btn ${doc ? '' : 'tab-btn-active'}" onclick="setImportTab('json')">Paste JSON</button>
+    </div>
+    <div class="modal-body">
+      ${s.error ? `<div class="import-error mb-4">${sanitizeInput(s.error)}</div>` : ''}
+      ${body}
+    </div>
+    <div class="modal-footer" style="justify-content:space-between;">
+      <span class="text-xs text-muted">${doc
+        ? (importState.phase === 'done' && (extraction?.unplaced || 0) > 0
+          ? `${extraction.unplaced} finding${extraction.unplaced === 1 ? '' : 's'} could not be placed with confidence`
+          : `DOCX and PDF only`)
+        : 'Pasted findings are reviewed the same way'}</span>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost" onclick="closeImportModal()">Cancel</button>
+        <button class="btn btn-primary" ${ready ? `onclick="${doc ? 'openExtractionReview()' : 'reviewPastedFindings()'}"` : 'disabled'}>
+          ${doc && importState.phase === 'done' ? `Review ${(extraction.findings || []).length} findings` : 'Review findings'}
+        </button>
+      </div>
+    </div>`;
+
+  if (doc && importState.phase === 'idle') wireImportDropzone();
+}
+
+// wireImportDropzone accepts a real drop as well as a click, because dropping a
+// report onto the box is what the box looks like it does.
+function wireImportDropzone() {
+  const zone = document.getElementById('import-dropzone');
+  if (!zone) return;
+  ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => {
+    e.preventDefault();
+    zone.classList.add('is-over');
+  }));
+  ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, e => {
+    e.preventDefault();
+    if (ev === 'dragleave' && zone.contains(e.relatedTarget)) return;
+    zone.classList.remove('is-over');
+  }));
+  zone.addEventListener('drop', e => {
+    if (e.dataTransfer?.files?.length) handleImportFile(e.dataTransfer.files);
+  });
+}
+
+function resetImport() {
+  importState.phase = 'idle';
+  importState.error = '';
+  extraction = null;
+  paintImportModal();
+}
+
+function formatMB(bytes) {
+  return bytes >= 1024 * 1024
+    ? (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+    : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+}
+
+async function handleImportFile(files) {
+  const file = files && files[0];
+  if (!file) return;
+
+  const name = file.name || '';
+  const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+  if (ext !== '.docx' && ext !== '.pdf') {
+    importState.error = 'Only .docx and .pdf reports can be read. A .doc has to be saved as .docx first.';
+    paintImportModal();
     return;
   }
-  for (const f of findings) {
-    if (!f.title || !f.severity) {
-      showToast('Each finding needs title and severity', 'error');
+  if (file.size > IMPORT_MAX_MB * 1024 * 1024) {
+    importState.error = `That report is ${formatMB(file.size)}. The limit is ${IMPORT_MAX_MB} MB.`;
+    paintImportModal();
+    return;
+  }
+
+  importState.phase = 'busy';
+  importState.error = '';
+  importState.filename = name;
+  importState.size = formatMB(file.size);
+  paintImportModal();
+
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const res = await api.upload(`/engagements/${bulkImportEngagementId}/findings/extract`, form);
+    extraction = res.data;
+    if (!extraction || !(extraction.findings || []).length) {
+      importState.phase = 'idle';
+      importState.error = (extraction?.notes || [])[0]
+        || 'No findings could be read out of that document.';
+      paintImportModal();
       return;
     }
-  }
-  try {
-    const res = await api.post('/engagements/' + bulkImportEngagementId + '/findings/bulk', { findings: findings });
-    showToast('Imported ' + res.data.length + ' findings', 'success');
-    document.getElementById('bulk-import-overlay').remove();
-    // Force re-render to show new findings
-    MCOLLABORATOR.render();
+    importState.phase = 'done';
   } catch (e) {
-    showToast('Import failed: ' + e.message, 'error');
+    importState.phase = 'idle';
+    importState.error = e.message || 'The document could not be read.';
+  }
+  paintImportModal();
+}
+
+// reviewPastedFindings turns a pasted array into the same shape the extractor
+// returns, so JSON and a document reach the review screen identically.
+function reviewPastedFindings() {
+  const textarea = document.getElementById('bulk-import-json');
+  if (!textarea) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(textarea.value);
+    if (!Array.isArray(parsed)) throw new Error('the top level has to be an array');
+  } catch (e) {
+    importState.error = 'That is not valid JSON: ' + e.message;
+    paintImportModal();
+    return;
+  }
+  const bad = parsed.find(f => !f || !f.title || !f.severity);
+  if (bad) {
+    importState.error = 'Every finding needs at least a title and a severity.';
+    paintImportModal();
+    return;
+  }
+
+  const findings = parsed.map(f => {
+    const code = normalizeAreaCode(f.category || f.area || '');
+    return {
+      title: f.title || '',
+      description: f.description || '',
+      impact: f.impact || '',
+      severity: f.severity || 'info',
+      cvss_vector: f.cvss_vector || '',
+      cvss_score: f.cvss_score || 0,
+      affected_system: f.affected_system || f.node_id || '',
+      attack_vector: f.attack_vector || '',
+      poc: f.poc || '',
+      remediation: f.remediation || f.recommendation || '',
+      category: code,
+      confidence: code ? 'heading' : 'none',
+      reason: code ? 'From the category in the pasted JSON' : 'The pasted JSON gave no category'
+    };
+  });
+
+  const byArea = {};
+  findings.forEach(f => { if (f.category) byArea[f.category] = (byArea[f.category] || 0) + 1; });
+  extraction = {
+    filename: 'Pasted JSON',
+    kind: 'json',
+    findings: findings,
+    by_area: byArea,
+    unplaced: findings.filter(f => !f.category).length
+  };
+  openExtractionReview();
+}
+
+function openExtractionReview() {
+  closeImportModal();
+  reviewCards = (extraction.findings || []).map((f, i) => Object.assign({}, f, { _id: i + 1 }));
+  MCOLLABORATOR.navigate('#/import-review');
+}
+
+// -------- REVIEW EXTRACTED FINDINGS --------
+//
+// One column per assessment area plus a holding pen for anything the document
+// did not place. A card can be dragged between columns or set from its own
+// dropdown, and nothing is saved until every card has an area: a finding with
+// none prints in no section of the report, so importing one is importing a
+// finding that quietly will not appear.
+
+let reviewCards = [];
+let reviewDragging = null;
+
+function renderExtractionReview() {
+  if (!extraction || !reviewCards.length) {
+    return `
+      <div class="card" style="padding:56px 24px;text-align:center;max-width:560px;margin:40px auto;">
+        <h3 class="font-display font-bold mb-2">Nothing to review</h3>
+        <p class="text-sm text-muted mb-4">Import a report or paste some findings first.</p>
+        <a class="btn btn-primary" href="#/ledger/project" style="text-decoration:none;">Back to the project</a>
+      </div>`;
+  }
+  return `
+    <div class="review" style="margin:-24px;">
+      <div id="review-head"></div>
+      <div class="review-hint">
+        &#9889; Each finding was placed by its section heading, or by its wording where the heading did not say.
+        Drag a card into another column, or set its area on the card &mdash; whichever is quicker.
+      </div>
+      <div class="review-board"><div class="review-inner" id="review-board"></div></div>
+    </div>`;
+}
+
+function afterRenderExtractionReview() {
+  if (!extraction || !reviewCards.length) return;
+  paintReviewBoard();
+}
+
+function paintReviewBoard() {
+  const head = document.getElementById('review-head');
+  const board = document.getElementById('review-board');
+  if (!board) return;
+
+  const unplaced = reviewCards.filter(c => !c.category).length;
+
+  if (head) {
+    head.innerHTML = `
+      <div class="ws-topbar">
+        <div style="min-width:0;">
+          <h2 class="font-display font-bold mb-1" style="font-size:20px;letter-spacing:-0.2px;">Review extracted findings</h2>
+          <div class="ws-meta">
+            <span class="font-mono">${sanitizeInput(extraction.filename || '')}</span>
+            <span class="ws-sep">|</span>
+            <span>${reviewCards.length} finding${reviewCards.length === 1 ? '' : 's'} read</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-3" style="flex-shrink:0;">
+          <span class="review-flag ${unplaced ? 'warn' : 'ok'}">
+            ${unplaced ? `${unplaced} still need a category` : 'Every finding has an area'}
+          </span>
+          <button class="btn btn-secondary" onclick="discardExtraction()">Discard</button>
+          <button class="btn btn-primary" ${unplaced ? 'disabled' : 'onclick="commitExtraction()"'} id="review-import-btn">
+            Import ${reviewCards.length} finding${reviewCards.length === 1 ? '' : 's'}
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // The holding pen first, then areas that hold something, then the rest - so a
+  // card can be dragged to any area without hunting for its column.
+  const used = REPORT_AREAS.map(a => a.code).filter(c => reviewCards.some(f => f.category === c));
+  const rest = REPORT_AREAS.map(a => a.code).filter(c => !used.includes(c));
+  const codes = [''].concat(used, rest);
+
+  board.innerHTML = codes.map(code => {
+    const pen = code === '';
+    const area = REPORT_AREAS.find(a => a.code === code);
+    const mine = reviewCards.filter(f => f.category === code);
+
+    const cards = mine.map(f => {
+      const sure = f.confidence !== 'none';
+      const opts = [{ code: '', label: 'Choose an area…' }]
+        .concat(REPORT_AREAS.map(a => ({ code: a.code, label: a.label })))
+        .map(o => `<option value="${o.code}" ${o.code === f.category ? 'selected' : ''}>${sanitizeInput(o.label)}</option>`).join('');
+      const sev = f.severity || 'info';
+      return `
+        <div class="review-card" draggable="true" data-id="${f._id}">
+          <div class="flex items-center gap-2 mb-2">
+            <span style="color:var(--muted);font-size:11px;">&#8942;&#8942;</span>
+            <span class="badge-severity ${sev === 'info' ? 'info' : sev}" style="font-size:9.5px;">${sev}</span>
+            <span style="flex:1;"></span>
+            ${f.ref ? `<span class="font-mono text-xs" style="color:var(--muted);">${sanitizeInput(f.ref)}</span>` : ''}
+          </div>
+          <div class="review-title">${sanitizeInput(f.title || 'Untitled finding')}</div>
+          <div class="review-host">${sanitizeInput(f.affected_system || '') || 'no host recorded'}</div>
+          <div class="review-why ${sure ? 'sure' : 'unsure'}">${sure ? '&#10003;' : '&#9888;'} ${sanitizeInput(f.reason || '')}</div>
+          <select class="input w-full ${f.category ? '' : 'unset'}" style="padding:5px 8px;font-size:11px;"
+                  data-id="${f._id}" onchange="setReviewArea(${f._id}, this.value)" aria-label="Assessment area">${opts}</select>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="review-col" data-code="${code}" data-pen="${pen}">
+        <div class="review-col-head">
+          <div class="flex items-center justify-between gap-2" style="margin-bottom:3px;">
+            <span class="review-col-code" style="color:${pen ? 'var(--warning)' : 'var(--text)'};">${pen ? 'Needs a category' : code}</span>
+            <span class="review-col-count ${pen && mine.length ? 'warn' : ''}">${mine.length}</span>
+          </div>
+          <div class="text-xs text-muted" style="line-height:1.5;">
+            ${pen ? 'Nothing in the document said where these belong' : sanitizeInput(area ? area.label : code)}
+          </div>
+        </div>
+        <div class="review-col-body">
+          ${cards || `<div class="review-empty">${pen ? 'Everything found a home' : 'Nothing sorted here'}</div>`}
+        </div>
+      </div>`;
+  }).join('');
+
+  wireReviewDrag();
+}
+
+function setReviewArea(id, code) {
+  const card = reviewCards.find(c => c._id === id);
+  if (!card || card.category === code) return;
+  card.category = code;
+  card.confidence = code ? 'moved' : 'none';
+  card.reason = code ? 'Moved by you' : 'No area set';
+  paintReviewBoard();
+}
+
+// The drag runs on the DOM, not through a redraw: re-rendering mid-drag tears
+// the card out from under the pointer and cancels it.
+function wireReviewDrag() {
+  const board = document.getElementById('review-board');
+  if (!board) return;
+
+  board.querySelectorAll('.review-card').forEach(card => {
+    card.addEventListener('dragstart', e => {
+      reviewDragging = Number(card.dataset.id);
+      card.classList.add('is-dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', card.dataset.id); } catch (err) { /* older engines */ }
+      }
+    });
+    card.addEventListener('dragend', () => {
+      reviewDragging = null;
+      card.classList.remove('is-dragging');
+      board.querySelectorAll('.review-col.is-over').forEach(c => c.classList.remove('is-over'));
+      board.querySelectorAll('.review-drop').forEach(d => d.remove());
+    });
+  });
+
+  board.querySelectorAll('.review-col').forEach(col => {
+    col.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      if (col.classList.contains('is-over')) return;
+      col.classList.add('is-over');
+      const holds = reviewCards.some(c => c._id === reviewDragging && c.category === col.dataset.code);
+      if (!holds && !col.querySelector('.review-drop')) {
+        const slot = document.createElement('div');
+        slot.className = 'review-drop';
+        slot.textContent = 'Drop here';
+        col.querySelector('.review-col-body').appendChild(slot);
+        const empty = col.querySelector('.review-empty');
+        if (empty) empty.remove();
+      }
+    });
+    col.addEventListener('dragleave', e => {
+      if (col.contains(e.relatedTarget)) return;
+      col.classList.remove('is-over');
+      const slot = col.querySelector('.review-drop');
+      if (slot) slot.remove();
+    });
+    col.addEventListener('drop', e => {
+      e.preventDefault();
+      col.classList.remove('is-over');
+      if (reviewDragging !== null) setReviewArea(reviewDragging, col.dataset.code);
+    });
+  });
+}
+
+function discardExtraction() {
+  if (!confirm('Discard these findings without importing them?')) return;
+  extraction = null;
+  reviewCards = [];
+  MCOLLABORATOR.navigate('#/ledger/project');
+}
+
+async function commitExtraction() {
+  if (reviewCards.some(c => !c.category)) {
+    showToast('Every finding needs an assessment area first', 'error');
+    return;
+  }
+  const btn = document.getElementById('review-import-btn');
+  if (btn) btn.disabled = true;
+
+  const findings = reviewCards.map(c => ({
+    title: c.title,
+    description: c.description,
+    impact: c.impact,
+    severity: c.severity || 'info',
+    cvss_vector: c.cvss_vector || '',
+    cvss_score: Number(c.cvss_score) || 0,
+    affected_system: c.affected_system || '',
+    attack_vector: c.attack_vector || '',
+    poc: c.poc || '',
+    remediation: c.remediation || '',
+    category: c.category,
+    status: 'open'
+  }));
+
+  try {
+    const res = await api.post(`/engagements/${bulkImportEngagementId}/findings/bulk`, { findings: findings });
+    showToast(`Imported ${(res.data || []).length} findings`, 'success');
+    extraction = null;
+    reviewCards = [];
+    MCOLLABORATOR.navigate('#/ledger/project');
+  } catch (e) {
+    showToast('Import failed: ' + (e.message || 'unknown error'), 'error');
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -2840,6 +3500,9 @@ function afterRender(path) {
       break;
     case path === '/ledger/project':
       setTimeout(afterRenderProjectLedger, 50);
+      break;
+    case path === '/import-review':
+      setTimeout(afterRenderExtractionReview, 50);
       break;
     case path === '/evidence':
       setTimeout(afterRenderEvidenceVault, 50);

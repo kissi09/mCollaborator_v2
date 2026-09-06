@@ -196,6 +196,9 @@ const MCOLLABORATOR = {
       case path === '/closure-prep':
         pageContent = renderClosurePrep();
         break;
+      case path === '/import-review':
+        pageContent = renderExtractionReview();
+        break;
       case path === '/change-password':
         pageContent = renderChangePassword();
         break;
@@ -249,6 +252,7 @@ function getPageTitle(path) {
     '/command/report-builder': 'Report Builder',
     '/admin/users': 'User Management',
     '/closure-prep': 'Closure Prep',
+    '/import-review': 'Review Imported Findings',
     '/change-password': 'Change Password',
     '/login': 'Login',
   };
