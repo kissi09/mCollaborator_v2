@@ -1,0 +1,31 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Project workspace", "is_interactive": true },
+    { "file": "Import.dc.html", "x": 1560, "y": 0, "w": 880, "h": 720, "title": "Import findings", "is_interactive": true },
+    { "file": "Review.dc.html", "x": 0, "y": 1020, "w": 1440, "h": 900, "title": "Review extracted findings", "is_interactive": true }
+  ],
+  "annotations": [
+    {
+      "id": "workspace-note",
+      "x": 0,
+      "y": -150,
+      "w": 500,
+      "text": "Project workspace — findings grouped by assessment area instead of one flat list.\n\nEach group carries its severity spread and count, and every finding shows whether it has the three things the report and deck need: an affected host, a recommendation, and evidence. Filter chips and the group headers work."
+    },
+    {
+      "id": "import-note",
+      "x": 1560,
+      "y": -150,
+      "w": 420,
+      "text": "Import — DOCX or PDF, with the JSON paste kept as a second tab.\n\nClick the dropzone to watch it read the file. It reports how the findings sorted, and how many it could not place."
+    },
+    {
+      "id": "review-note",
+      "x": 0,
+      "y": 1940,
+      "w": 560,
+      "text": "Review — drag a card between columns, or set its area on the card itself.\n\nAnything the document did not place lands in the amber holding pen on the left, and the import stays blocked until that column is empty. Each card says why it landed where it did."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

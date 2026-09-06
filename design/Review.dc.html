@@ -1,0 +1,266 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; }
+    a { color: #FF7900; text-decoration: none; }
+    a:hover { color: #FFA04D; }
+    * { box-sizing: border-box; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0F172A; }
+    ::-webkit-scrollbar-thumb { background: #94A3B8; border-radius: 3px; }
+    select { appearance: none; -webkit-appearance: none; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; overflow: hidden; background: #0F172A; color: #F8FAFC; font-family: 'DM Sans', system-ui, sans-serif;">
+
+  <!-- header -->
+  <div style="flex-shrink: 0; background: #1E293B; border-bottom: 1px solid #334155; padding: 16px 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;">
+    <div>
+      <h1 style="margin: 0 0 6px; font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700; letter-spacing: -0.2px;">Review extracted findings</h1>
+      <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: #94A3B8;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5h7l5 5v14H6z"></path><path d="M13 2.5v5h5"></path></svg>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px;">Acme Test Bank &mdash; VAPT.docx</span>
+        <span style="color: #334155;">|</span>
+        <span>{{total}} findings read</span>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+      <span style="{{warnStyle}}">{{warnLabel}}</span>
+      <button type="button" style="display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 16px;border-radius:8px;cursor:pointer;background:#1E293B;border:1px solid #334155;color:#F8FAFC;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;letter-spacing:0.5px;">Discard</button>
+      <button type="button" style="{{ctaStyle}}">{{ctaLabel}}</button>
+    </div>
+  </div>
+
+  <!-- hint -->
+  <div style="flex-shrink: 0; padding: 12px 24px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: #94A3B8;">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#FF7900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;" aria-hidden="true"><path d="M2.5 8h4l1.5-3 2 6 1.5-3h2"></path></svg>
+    Each finding was placed by its section heading, or by its wording where the heading did not say. Drag a card into another column, or set its area on the card &mdash; whichever is quicker.
+  </div>
+
+  <!-- board -->
+  <div style="flex: 1; overflow-x: auto; overflow-y: hidden; padding: 20px 24px 24px;">
+    <div style="display: flex; gap: 14px; height: 100%; align-items: stretch;">
+      <sc-for list="{{columns}}" as="col" hint-placeholder-count="6">
+        <div style="{{col.style}}"
+             onDragOver="{{col.over}}" onDragLeave="{{col.leave}}" onDrop="{{col.drop}}">
+
+          <div style="padding: 12px 13px 10px; border-bottom: 1px solid #334155; flex-shrink: 0;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 3px;">
+              <span style="{{col.codeStyle}}">{{col.code}}</span>
+              <span style="{{col.countStyle}}">{{col.count}}</span>
+            </div>
+            <div style="font-size: 11.5px; line-height: 1.5; color: #94A3B8;">{{col.label}}</div>
+          </div>
+
+          <div style="flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 9px;">
+            <sc-for list="{{col.items}}" as="f" hint-placeholder-count="2">
+              <div draggable="true" onDragStart="{{f.dragStart}}" onDragEnd="{{f.dragEnd}}" style="{{f.cardStyle}}">
+
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="#475569" style="flex-shrink: 0;" aria-hidden="true"><circle cx="6" cy="3.5" r="1.3"></circle><circle cx="10" cy="3.5" r="1.3"></circle><circle cx="6" cy="8" r="1.3"></circle><circle cx="10" cy="8" r="1.3"></circle><circle cx="6" cy="12.5" r="1.3"></circle><circle cx="10" cy="12.5" r="1.3"></circle></svg>
+                  <span style="{{f.sevStyle}}">{{f.severity}}</span>
+                  <div style="flex: 1;"></div>
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #475569;">{{f.ref}}</span>
+                </div>
+
+                <div style="font-size: 12.5px; font-weight: 600; line-height: 1.45; margin-bottom: 5px; color: #F8FAFC;">{{f.title}}</div>
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; line-height: 1.5; color: #94A3B8; margin-bottom: 8px;">{{f.affected}}</div>
+
+                <div style="display: flex; align-items: flex-start; gap: 5px; margin-bottom: 9px;">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="{{f.whyIconStyle}}" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"></path></svg>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="{{f.whyWarnStyle}}" aria-hidden="true"><path d="M8 2.5 14.5 13.5h-13z"></path><path d="M8 6.6v2.8"></path><path d="M8 11.5v.01"></path></svg>
+                  <span style="{{f.whyStyle}}">{{f.why}}</span>
+                </div>
+
+                <select value="{{f.area}}" onChange="{{f.setArea}}" style="{{f.selectStyle}}">
+                  <sc-for list="{{f.options}}" as="o" hint-placeholder-count="7">
+                    <option value="{{o.code}}">{{o.label}}</option>
+                  </sc-for>
+                </select>
+              </div>
+            </sc-for>
+
+            <sc-if value="{{col.showDrop}}" hint-placeholder-val="{{ false }}">
+              <div style="{{col.dropStyle}}">Drop here</div>
+            </sc-if>
+
+            <sc-if value="{{col.showEmpty}}" hint-placeholder-val="{{ false }}">
+              <div style="border: 1px dashed #334155; border-radius: 8px; padding: 18px 12px; text-align: center; font-size: 11.5px; line-height: 1.6; color: #475569;">{{col.emptyNote}}</div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#FF7900","options":["#FF7900","#3B82F6","#22C55E","#8B5CF6"]}}'>
+const SEV = { critical: '#EF4444', high: '#F59E0B', medium: '#3B82F6', low: '#22C55E', info: '#94A3B8' };
+
+function rgba(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+}
+
+const AREAS = [
+  { code: 'IPT',  label: 'Internal Penetration Testing' },
+  { code: 'EPT',  label: 'External Penetration Testing' },
+  { code: 'IPTC', label: 'Internal Cloud Penetration Testing' },
+  { code: 'WPT',  label: 'Web Application Penetration Testing' },
+  { code: 'CFG',  label: 'Configuration Files Review' },
+  { code: 'ASA',  label: 'API Security Assessment' },
+  { code: 'ADT',  label: 'Active Directory Testing' },
+  { code: 'WNA',  label: 'Wireless Network Assessment' },
+  { code: 'NAR',  label: 'Network Architecture Review' }
+];
+
+const SEED = [
+  { id: 1,  area: 'IPT', ref: 'p.19', severity: 'high',     title: 'SMB signing is not required on the domain controllers', affected: '10.20.4.11, 10.20.4.12', why: 'Under heading 3.3', sure: true },
+  { id: 2,  area: 'IPT', ref: 'p.21', severity: 'high',     title: 'Unsupported Windows Server 2012 R2 hosts in production', affected: '10.20.6.31, 10.20.6.32', why: 'Under heading 3.3', sure: true },
+  { id: 3,  area: 'EPT', ref: 'p.25', severity: 'high',     title: 'Firewall management interface reachable from the internet', affected: '196.46.20.11:8443', why: 'Under heading 3.5', sure: true },
+  { id: 4,  area: 'EPT', ref: 'p.27', severity: 'medium',   title: 'Weak TLS configuration on the public web estate', affected: '196.46.20.14, .19, .22', why: 'Under heading 3.5', sure: true },
+  { id: 5,  area: 'WPT', ref: 'p.31', severity: 'critical', title: 'SQL injection in the internet banking login', affected: 'ibank.acmetest.local/v1/auth/login', why: 'Under heading 3.6', sure: true },
+  { id: 6,  area: 'WPT', ref: 'p.34', severity: 'medium',   title: 'Reflected cross-site scripting in the search parameter', affected: 'ibank.acmetest.local/transactions', why: 'Under heading 3.6', sure: true },
+  { id: 7,  area: 'CFG', ref: 'p.38', severity: 'high',     title: 'Default SNMP community string on the perimeter firewalls', affected: 'fw-hq-01, fw-hq-02, fw-dr-01', why: 'Under heading 3.7', sure: true },
+  { id: 8,  area: 'CFG', ref: 'p.40', severity: 'medium',   title: 'Firewall rules permitting any-to-any traffic between VLANs', affected: 'fw-hq-01 (policy 41-49)', why: 'Under heading 3.7', sure: true },
+  { id: 9,  area: 'ADT', ref: 'p.43', severity: 'medium',   title: 'Kerberoastable service account with a weak password', affected: 'corp.acmetest.local\\svc_sql', why: 'No heading — matched “Kerberos”, “SPN”', sure: false },
+  { id: 10, area: '',    ref: 'p.45', severity: 'high',     title: 'Flat network with no segmentation between VLANs', affected: 'HQ core, VLAN 1', why: 'Reads as both internal testing and architecture', sure: false },
+  { id: 11, area: '',    ref: 'p.46', severity: 'medium',   title: 'No out-of-band management network', affected: '', why: 'No heading and no host to go on', sure: false }
+];
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { items: SEED.map((f) => Object.assign({}, f)), dragging: null, over: null };
+  }
+
+  accent() { return this.props.accent ?? '#FF7900'; }
+
+  move(id, area) {
+    this.setState({
+      items: this.state.items.map((f) => (f.id === id ? Object.assign({}, f, { area: area, moved: true }) : f)),
+      dragging: null,
+      over: null
+    });
+  }
+
+  renderVals() {
+    const self = this;
+    const a = this.accent();
+    const items = this.state.items;
+    const unsorted = items.filter((f) => !f.area).length;
+
+    // Only the areas this engagement covers get a column, plus the holding pen.
+    const codes = ['', 'IPT', 'EPT', 'WPT', 'CFG', 'ADT', 'NAR'];
+
+    const card = (f) => {
+      const dragging = self.state.dragging === f.id;
+      return {
+        title: f.title,
+        severity: f.severity,
+        affected: f.affected || 'no host recorded',
+        ref: f.ref,
+        why: f.moved ? 'Moved by you' : f.why,
+        area: f.area,
+        options: [{ code: '', label: 'Choose an area…' }].concat(AREAS.map((x) => ({ code: x.code, label: x.label }))),
+        cardStyle: 'background:#1E293B;border:1px solid ' + (dragging ? a : '#334155') + ';border-radius:8px;padding:10px 11px;'
+          + 'cursor:grab;user-select:none;transition:border-color .12s,opacity .12s;'
+          + 'opacity:' + (dragging ? '0.45' : '1') + ';',
+        sevStyle: 'display:inline-flex;align-items:center;padding:1px 7px;border-radius:4px;'
+          + "font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;"
+          + 'color:' + SEV[f.severity] + ';background:' + rgba(SEV[f.severity], 0.15) + ';border:1px solid ' + rgba(SEV[f.severity], 0.3) + ';',
+        whyStyle: 'font-size:10.5px;line-height:1.45;color:' + (f.sure || f.moved ? '#94A3B8' : '#F59E0B') + ';',
+        whyIconStyle: 'display:' + (f.sure || f.moved ? 'block' : 'none') + ';flex-shrink:0;margin-top:1px;color:#22C55E;',
+        whyWarnStyle: 'display:' + (f.sure || f.moved ? 'none' : 'block') + ';flex-shrink:0;margin-top:1px;color:#F59E0B;',
+        selectStyle: 'width:100%;background:#0F172A;border:1px solid ' + (f.area ? '#334155' : 'rgba(245,158,11,0.45)') + ';'
+          + 'color:' + (f.area ? '#F8FAFC' : '#F59E0B') + ';border-radius:8px;padding:5px 8px;font-size:11px;'
+          + "font-family:'DM Sans',sans-serif;outline:none;cursor:pointer;",
+        setArea: (e) => self.move(f.id, e.target.value),
+        dragStart: (e) => {
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = 'move';
+            try { e.dataTransfer.setData('text/plain', String(f.id)); } catch (err) { /* older engines */ }
+          }
+          self.setState({ dragging: f.id });
+        },
+        dragEnd: () => self.setState({ dragging: null, over: null })
+      };
+    };
+
+    const columns = codes.map((code) => {
+      const area = AREAS.find((x) => x.code === code);
+      const mine = items.filter((f) => f.area === code);
+      const isPen = code === '';
+      const isOver = self.state.over === code && self.state.dragging !== null;
+      const draggingHere = self.state.dragging !== null
+        && items.some((f) => f.id === self.state.dragging && f.area === code);
+
+      return {
+        code: isPen ? 'Needs a category' : code,
+        label: isPen ? 'Nothing in the document said where these belong' : (area ? area.label : code),
+        count: String(mine.length),
+        items: mine.map(card),
+        showDrop: isOver && !draggingHere,
+        showEmpty: mine.length === 0 && !(isOver && !draggingHere),
+        emptyNote: isPen ? 'Everything found a home' : 'Nothing sorted here',
+
+        style: 'width:240px;flex-shrink:0;display:flex;flex-direction:column;border-radius:8px;'
+          + 'transition:border-color .12s,background .12s;'
+          + 'border:1px solid ' + (isOver ? a : (isPen ? 'rgba(245,158,11,0.4)' : '#334155')) + ';'
+          + 'background:' + (isOver ? rgba(a, 0.07) : (isPen ? 'rgba(245,158,11,0.05)' : '#0F172A')) + ';',
+        codeStyle: "font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:0.4px;"
+          + 'color:' + (isPen ? '#F59E0B' : '#F8FAFC') + ';',
+        countStyle: 'display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;padding:0 5px;border-radius:4px;'
+          + "font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;"
+          + (isPen && mine.length > 0
+            ? 'color:#F59E0B;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);'
+            : 'color:#94A3B8;background:#1E293B;border:1px solid #334155;'),
+        dropStyle: 'border:1px dashed ' + a + ';border-radius:8px;padding:20px 12px;text-align:center;'
+          + 'font-size:11.5px;font-weight:600;color:' + a + ';background:' + rgba(a, 0.06) + ';',
+
+        over: (e) => {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+          if (self.state.over !== code) self.setState({ over: code });
+        },
+        leave: () => { if (self.state.over === code) self.setState({ over: null }); },
+        drop: (e) => {
+          e.preventDefault();
+          if (self.state.dragging !== null) self.move(self.state.dragging, code);
+        }
+      };
+    });
+
+    return {
+      total: String(items.length),
+      columns: columns,
+      warnLabel: unsorted === 0 ? 'Every finding has an area' : unsorted + ' still need a category',
+      warnStyle: 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:8px;'
+        + "font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;"
+        + (unsorted === 0
+          ? 'color:#22C55E;background:rgba(34,197,94,0.13);border:1px solid rgba(34,197,94,0.3);'
+          : 'color:#F59E0B;background:rgba(245,158,11,0.13);border:1px solid rgba(245,158,11,0.3);'),
+      ctaLabel: 'Import ' + items.length + ' findings',
+      ctaStyle: 'display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 16px;border-radius:8px;'
+        + "font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;letter-spacing:0.5px;"
+        + (unsorted === 0
+          ? 'background:' + a + ';border:1px solid ' + a + ';color:#0F172A;cursor:pointer;'
+          : 'background:#1E293B;border:1px solid #334155;color:#475569;cursor:default;')
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,410 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; }
+    a { color: #FF7900; text-decoration: none; }
+    a:hover { color: #FFA04D; }
+    * { box-sizing: border-box; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0F172A; }
+    ::-webkit-scrollbar-thumb { background: #94A3B8; border-radius: 3px; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; overflow: hidden; background: #0F172A; color: #F8FAFC; font-family: 'DM Sans', system-ui, sans-serif; font-size: 14px;">
+
+  <!-- navbar: matches .navbar / .nav-link in app.css -->
+  <div style="height: 64px; flex-shrink: 0; background: #1E293B; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; gap: 16px;">
+    <div style="display: flex; align-items: center; gap: 24px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+          <circle cx="13" cy="13" r="11" stroke="#F8FAFC" stroke-width="2.2"></circle>
+          <path d="M13 6.5 A6.5 6.5 0 1 0 19.5 13 L13 13 Z" fill="#FF7900"></path>
+        </svg>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: #FF7900;">mCollaborator</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <span style="padding: 6px 14px; font-size: 13px; font-weight: 500; color: #94A3B8; border-radius: 6px;">Dashboard</span>
+        <span style="padding: 6px 14px; font-size: 13px; font-weight: 600; color: #0F172A; background: #FF7900; border-radius: 6px;">Projects</span>
+        <span style="padding: 6px 14px; font-size: 13px; font-weight: 500; color: #94A3B8; border-radius: 6px;">Findings</span>
+        <span style="padding: 6px 14px; font-size: 13px; font-weight: 500; color: #94A3B8; border-radius: 6px;">Evidence</span>
+        <span style="padding: 6px 14px; font-size: 13px; font-weight: 500; color: #94A3B8; border-radius: 6px;">Reports</span>
+        <span style="padding: 6px 14px; font-size: 13px; font-weight: 500; color: #94A3B8; border-radius: 6px;">Users</span>
+        <span style="padding: 6px 14px; font-size: 13px; font-weight: 500; color: #94A3B8; border-radius: 6px;">Closure Prep</span>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <span style="font-size: 13px; color: #94A3B8;">Emmanuel Addo Kissi</span>
+    </div>
+  </div>
+
+  <!-- project header: what the ledger never showed you at a glance -->
+  <div style="flex-shrink: 0; background: #1E293B; border-bottom: 1px solid #334155; padding: 16px 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;">
+    <div style="min-width: 0;">
+      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+        <h1 style="margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700; letter-spacing: -0.2px;">Acme Test Bank</h1>
+        <span style="display: inline-flex; align-items: center; height: 24px; padding: 2px 10px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #FF7900; background: rgba(255,121,0,0.15); border: 1px solid rgba(255,121,0,0.3);">active</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #94A3B8;">
+        <span>TEST-REP-001-00000-01</span>
+        <span style="color: #334155;">|</span>
+        <span>17 Aug &ndash; 28 Aug 2026</span>
+        <span style="color: #334155;">|</span>
+        <span>6 areas in scope</span>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+      <button type="button" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; border-radius: 8px; cursor: pointer; background: #1E293B; border: 1px solid #334155; color: #F8FAFC;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 10.5V2.5"></path><path d="M4.75 5.75 8 2.5l3.25 3.25"></path><path d="M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"></path></svg>
+        Import findings
+      </button>
+      <button type="button" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; border-radius: 8px; cursor: pointer; background: #1E293B; border: 1px solid #334155; color: #F8FAFC;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9"></path><path d="M3.5 8h9"></path></svg>
+        New finding
+      </button>
+      <button type="button" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; border-radius: 8px; cursor: pointer; background: #FF7900; border: 1px solid transparent; color: #0F172A;">
+        Generate report
+      </button>
+    </div>
+  </div>
+
+  <div style="flex: 1; display: flex; overflow: hidden;">
+
+    <!-- scope pane -->
+    <div style="width: 300px; flex-shrink: 0; border-right: 1px solid #334155; overflow-y: auto; padding: 20px 16px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: #94A3B8; padding-bottom: 8px; margin-bottom: 14px; border-bottom: 1px solid #334155;">Scope &amp; targets</div>
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <sc-for list="{{scope}}" as="s" hint-placeholder-count="4">
+          <div>
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 4px;">
+              <span style="font-size: 12px; font-weight: 600; color: #F8FAFC;">{{s.label}}</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #94A3B8;">{{s.code}}</span>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6; color: #94A3B8;">{{s.text}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- findings, grouped by assessment area -->
+    <div style="flex: 1; min-width: 0; overflow-y: auto; padding: 20px 24px 48px;">
+
+      <!-- filter bar -->
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px;">
+        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+          <sc-for list="{{sevFilters}}" as="f" hint-placeholder-count="6">
+            <button type="button" onClick="{{f.pick}}" style="{{f.style}}">{{f.label}}<span style="{{f.countStyle}}">{{f.count}}</span></button>
+          </sc-for>
+        </div>
+        <button type="button" onClick="{{toggleGaps}}" style="{{gapsStyle}}">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5 14.5 13.5h-13z"></path><path d="M8 6.5v3"></path><path d="M8 11.6v.01"></path></svg>
+          {{gapsLabel}}
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+          <div style="border: 1px solid #334155; border-radius: 8px; background: #1E293B; overflow: hidden;">
+
+            <!-- group header -->
+            <div onClick="{{g.toggle}}" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; background: {{g.headBg}};">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#94A3B8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="{{g.chevronStyle}}" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>
+              <span style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 600;">{{g.label}}</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #94A3B8; border: 1px solid #334155; border-radius: 4px; padding: 1px 5px;">{{g.code}}</span>
+              <div style="flex: 1;"></div>
+              <div style="display: flex; align-items: center; gap: 3px;">
+                <sc-for list="{{g.sevDots}}" as="d" hint-placeholder-count="4">
+                  <span style="{{d.style}}">{{d.n}}</span>
+                </sc-for>
+              </div>
+              <span style="font-size: 12px; color: #94A3B8; min-width: 74px; text-align: right;">{{g.countLabel}}</span>
+            </div>
+
+            <!-- findings -->
+            <div style="{{g.bodyStyle}}">
+              <sc-for list="{{g.items}}" as="f" hint-placeholder-count="2">
+                <div style="display: flex; gap: 14px; padding: 13px 16px; border-top: 1px solid #334155; align-items: flex-start;">
+                  <div style="{{f.scoreStyle}}">{{f.score}}</div>
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px;">
+                      <span style="font-size: 13px; font-weight: 600; color: #F8FAFC;">{{f.title}}</span>
+                      <span style="{{f.sevStyle}}">{{f.severity}}</span>
+                    </div>
+                    <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #94A3B8; margin-bottom: 7px;">{{f.affected}}</div>
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                      <sc-for list="{{f.checks}}" as="c" hint-placeholder-count="3">
+                        <span style="{{c.style}}">
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="{{c.iconStyle}}" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"></path></svg>
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="{{c.dashStyle}}" aria-hidden="true"><path d="M3.5 8h9"></path></svg>
+                          {{c.label}}
+                        </span>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <span style="{{f.statusStyle}}">{{f.status}}</span>
+                </div>
+              </sc-for>
+
+              <sc-if value="{{g.empty}}" hint-placeholder-val="{{ false }}">
+                <div style="padding: 16px; border-top: 1px solid #334155; font-size: 12px; line-height: 1.7; color: #94A3B8;">
+                  No findings recorded. This section will print
+                  <span style="color: #F8FAFC;">&ldquo;No security issues were identified during the {{g.label}}.&rdquo;</span>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- right rail -->
+    <div style="width: 300px; flex-shrink: 0; border-left: 1px solid #334155; overflow-y: auto; padding: 20px 16px;">
+
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: #94A3B8; padding-bottom: 8px; margin-bottom: 14px; border-bottom: 1px solid #334155;">Report readiness</div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 26px;">
+        <sc-for list="{{readiness}}" as="r" hint-placeholder-count="3">
+          <div>
+            <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px;">
+              <span style="font-size: 12px; color: #F8FAFC;">{{r.label}}</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{r.tone}};">{{r.value}}</span>
+            </div>
+            <div style="height: 4px; border-radius: 2px; background: #0F172A; overflow: hidden;">
+              <div style="{{r.barStyle}}"></div>
+            </div>
+            <div style="font-size: 11px; line-height: 1.6; color: #94A3B8; margin-top: 5px;">{{r.note}}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: #94A3B8; padding-bottom: 8px; margin-bottom: 14px; border-bottom: 1px solid #334155;">Project</div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <sc-for list="{{meta}}" as="m" hint-placeholder-count="4">
+          <div>
+            <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: #94A3B8; margin-bottom: 2px;">{{m.k}}</div>
+            <div style="font-size: 13px; color: #F8FAFC;">{{m.v}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#FF7900","options":["#FF7900","#3B82F6","#22C55E","#8B5CF6"]},"density":{"editor":"enum","default":"comfortable","options":["comfortable","compact"]}}'>
+const SEV = {
+  critical: '#EF4444',
+  high:     '#F59E0B',
+  medium:   '#3B82F6',
+  low:      '#22C55E',
+  info:     '#94A3B8'
+};
+
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+
+const AREAS = [
+  { code: 'IPT', label: 'Internal Penetration Testing' },
+  { code: 'EPT', label: 'External Penetration Testing' },
+  { code: 'WPT', label: 'Web Application Penetration Testing' },
+  { code: 'CFG', label: 'Configuration Files Review' },
+  { code: 'ADT', label: 'Active Directory Testing' },
+  { code: 'NAR', label: 'Network Architecture Review' }
+];
+
+const FINDINGS = [
+  { id: 1,  area: 'IPT', title: 'SMB signing is not required on the domain controllers', severity: 'high',     score: '8.0', status: 'open',        affected: '10.20.4.11, 10.20.4.12', evidence: true,  rec: true,  host: true },
+  { id: 2,  area: 'IPT', title: 'Unsupported Windows Server 2012 R2 hosts in production', severity: 'high',    score: '7.8', status: 'open',        affected: '10.20.6.31, 10.20.6.32, 10.20.6.40', evidence: false, rec: true,  host: true },
+  { id: 3,  area: 'EPT', title: 'Firewall management interface reachable from the internet', severity: 'high', score: '8.6', status: 'open',        affected: '196.46.20.11:8443', evidence: false, rec: true,  host: true },
+  { id: 4,  area: 'EPT', title: 'Weak TLS configuration on the public web estate', severity: 'medium',         score: '5.9', status: 'in progress', affected: '196.46.20.14, .19, .22', evidence: true,  rec: true,  host: true },
+  { id: 5,  area: 'WPT', title: 'SQL injection in the internet banking login', severity: 'critical',           score: '9.8', status: 'open',        affected: 'ibank.acmetest.local/v1/auth/login', evidence: true,  rec: true,  host: true },
+  { id: 6,  area: 'WPT', title: 'Reflected cross-site scripting in the search parameter', severity: 'medium',  score: '6.1', status: 'open',        affected: 'ibank.acmetest.local/transactions', evidence: false, rec: true,  host: true },
+  { id: 7,  area: 'CFG', title: 'Default SNMP community string on the perimeter firewalls', severity: 'high',  score: '',    status: 'open',        affected: 'fw-hq-01, fw-hq-02, fw-dr-01', evidence: false, rec: true,  host: true },
+  { id: 8,  area: 'CFG', title: 'Firewall rules permitting any-to-any traffic between VLANs', severity: 'medium', score: '', status: 'draft',       affected: 'fw-hq-01 (policy 41-49)', evidence: false, rec: false, host: true },
+  { id: 9,  area: 'ADT', title: 'Kerberoastable service account with a weak password', severity: 'medium',     score: '',    status: 'open',        affected: 'corp.acmetest.local\\svc_sql', evidence: true,  rec: true,  host: true },
+  { id: 10, area: 'NAR', title: 'Flat network with no segmentation between VLANs', severity: 'high',           score: '',    status: 'open',        affected: 'HQ core, VLAN 1', evidence: false, rec: true,  host: true },
+  { id: 11, area: 'NAR', title: 'No out-of-band management network', severity: 'medium',                       score: '',    status: 'draft',       affected: '', evidence: false, rec: true,  host: false }
+];
+
+const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      sev: 'all',
+      gaps: false,
+      closed: {}
+    };
+  }
+
+  accent() { return this.props.accent ?? '#FF7900'; }
+
+  rowPad() { return (this.props.density ?? 'comfortable') === 'compact' ? '9px 16px' : '13px 16px'; }
+
+  visible() {
+    return FINDINGS.filter((f) => {
+      if (this.state.sev !== 'all' && f.severity !== this.state.sev) return false;
+      if (this.state.gaps && f.evidence && f.rec && f.host) return false;
+      return true;
+    });
+  }
+
+  chipStyle(on) {
+    const a = this.accent();
+    return 'display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:8px;cursor:pointer;'
+      + "font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;letter-spacing:0.3px;"
+      + (on
+        ? 'background:' + a + ';border:1px solid ' + a + ';color:#0F172A;'
+        : 'background:#1E293B;border:1px solid #334155;color:#94A3B8;');
+  }
+
+  renderVals() {
+    const self = this;
+    const a = this.accent();
+    const shown = this.visible();
+
+    const counts = { all: FINDINGS.length };
+    SEV_ORDER.forEach((s) => { counts[s] = FINDINGS.filter((f) => f.severity === s).length; });
+
+    const sevFilters = [{ key: 'all', label: 'All' }]
+      .concat(SEV_ORDER.filter((s) => counts[s] > 0).map((s) => ({ key: s, label: s.charAt(0).toUpperCase() + s.slice(1) })))
+      .map((f) => {
+        const on = self.state.sev === f.key;
+        return {
+          label: f.label,
+          count: String(counts[f.key]),
+          style: self.chipStyle(on),
+          countStyle: 'font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;padding:0 4px;border-radius:4px;'
+            + (on ? 'background:rgba(15,23,42,0.22);color:#0F172A;' : 'background:#0F172A;color:#94A3B8;'),
+          pick: () => self.setState({ sev: on ? 'all' : f.key })
+        };
+      });
+
+    const gapCount = FINDINGS.filter((f) => !f.evidence || !f.rec || !f.host).length;
+
+    const groups = AREAS.map((area) => {
+      const all = FINDINGS.filter((f) => f.area === area.code);
+      const items = shown.filter((f) => f.area === area.code);
+      const open = !self.state.closed[area.code];
+
+      const sevDots = SEV_ORDER
+        .map((s) => ({ s: s, n: all.filter((f) => f.severity === s).length }))
+        .filter((d) => d.n > 0)
+        .map((d) => ({
+          n: String(d.n),
+          style: 'display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;padding:0 5px;border-radius:4px;'
+            + "font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;"
+            + 'color:' + SEV[d.s] + ';background:' + rgba(SEV[d.s], 0.15) + ';border:1px solid ' + rgba(SEV[d.s], 0.3) + ';'
+        }));
+
+      return {
+        code: area.code,
+        label: area.label,
+        empty: all.length === 0,
+        countLabel: all.length === 1 ? '1 finding' : all.length + ' findings',
+        sevDots: sevDots,
+        headBg: open ? 'transparent' : 'rgba(15,23,42,0.4)',
+        chevronStyle: 'transition:transform .15s;transform:rotate(' + (open ? '90' : '0') + 'deg);flex-shrink:0;',
+        bodyStyle: 'display:' + (open ? 'block' : 'none') + ';',
+        toggle: () => {
+          const next = Object.assign({}, self.state.closed);
+          next[area.code] = open;
+          self.setState({ closed: next });
+        },
+        items: items.map((f) => ({
+          title: f.title,
+          severity: f.severity,
+          affected: f.affected || 'No affected host recorded',
+          score: f.score || '—',
+          status: f.status,
+          scoreStyle: 'flex-shrink:0;width:46px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;'
+            + "font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;"
+            + 'color:' + SEV[f.severity] + ';background:' + rgba(SEV[f.severity], 0.15) + ';border:1px solid ' + rgba(SEV[f.severity], 0.3) + ';',
+          sevStyle: 'display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;'
+            + "font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;"
+            + 'color:' + SEV[f.severity] + ';background:' + rgba(SEV[f.severity], 0.15) + ';border:1px solid ' + rgba(SEV[f.severity], 0.3) + ';',
+          statusStyle: 'flex-shrink:0;display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:8px;'
+            + "font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;"
+            + (f.status === 'draft'
+              ? 'color:#8B5CF6;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);'
+              : f.status === 'in progress'
+                ? 'color:' + a + ';background:' + rgba(a, 0.15) + ';border:1px solid ' + rgba(a, 0.3) + ';'
+                : 'color:#EF4444;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);'),
+          checks: [
+            { ok: f.host, label: 'affected host' },
+            { ok: f.rec, label: 'recommendation' },
+            { ok: f.evidence, label: 'evidence' }
+          ].map((c) => ({
+            label: c.label,
+            style: 'display:inline-flex;align-items:center;gap:4px;padding:1px 7px 1px 5px;border-radius:4px;font-size:10.5px;'
+              + (c.ok
+                ? 'color:#22C55E;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.22);'
+                : 'color:#F59E0B;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.22);'),
+            iconStyle: 'display:' + (c.ok ? 'block' : 'none') + ';',
+            dashStyle: 'display:' + (c.ok ? 'none' : 'block') + ';'
+          }))
+        }))
+      };
+    }).filter((g) => g.empty || g.items.length > 0 || (self.state.sev === 'all' && !self.state.gaps));
+
+    const withEvidence = FINDINGS.filter((f) => f.evidence).length;
+    const withRec = FINDINGS.filter((f) => f.rec).length;
+    const withHost = FINDINGS.filter((f) => f.host).length;
+    const bar = (n, tone) => 'height:100%;width:' + Math.round((n / FINDINGS.length) * 100) + '%;background:' + tone + ';';
+
+    return {
+      sevFilters: sevFilters,
+      gapsLabel: self.state.gaps ? 'Showing ' + gapCount + ' needing attention' : gapCount + ' need attention',
+      gapsStyle: self.chipStyle(self.state.gaps).replace('height:28px', 'height:28px') ,
+      toggleGaps: () => self.setState({ gaps: !self.state.gaps }),
+      groups: groups,
+      scope: [
+        { code: 'IPT', label: 'Internal Penetration Testing', text: '10.20.0.0/22 — 148 internal hosts' },
+        { code: 'EPT', label: 'External Penetration Testing', text: '11 public IPs, 4 external domains' },
+        { code: 'WPT', label: 'Web Application Testing', text: 'ibank.acmetest.local (2 roles)' },
+        { code: 'CFG', label: 'Configuration Files Review', text: '3 firewalls, 6 switches, 2 routers' },
+        { code: 'ADT', label: 'Active Directory Testing', text: 'corp.acmetest.local, 2 DCs' },
+        { code: 'NAR', label: 'Network Architecture Review', text: 'HQ, branch and DR topology' }
+      ],
+      readiness: [
+        {
+          label: 'Affected host recorded', value: withHost + ' of ' + FINDINGS.length, tone: '#22C55E',
+          barStyle: bar(withHost, '#22C55E'),
+          note: 'Prints as the affected row in every section.'
+        },
+        {
+          label: 'Recommendation written', value: withRec + ' of ' + FINDINGS.length, tone: '#F59E0B',
+          barStyle: bar(withRec, '#F59E0B'),
+          note: '1 finding would print an empty recommendation.'
+        },
+        {
+          label: 'Evidence attached', value: withEvidence + ' of ' + FINDINGS.length, tone: '#F59E0B',
+          barStyle: bar(withEvidence, '#F59E0B'),
+          note: 'Only these get a scenario slide in the closing deck.'
+        }
+      ],
+      meta: [
+        { k: 'Client', v: 'Acme Test Bank' },
+        { k: 'Methodology', v: 'PTES' },
+        { k: 'Lead', v: 'Emmanuel Addo Kissi' },
+        { k: 'Last report', v: 'Not generated yet' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
