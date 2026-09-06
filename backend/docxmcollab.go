@@ -924,6 +924,7 @@ func rewriteDetailTables(detail string, lib detailRowLibrary) string {
 }
 
 func fixDetailTable(tbl string) string {
+	tbl = dropSpacerRows(tbl)
 	columns := tableColumns(tbl)
 	rows := tableRows(tbl)
 
@@ -966,6 +967,43 @@ func fixDetailTable(tbl string) string {
 			}
 		}
 		tbl = tbl[:rows[ri].Start] + row + tbl[rows[ri].End:]
+	}
+	return tbl
+}
+
+// dropSpacerRows removes the empty band most of the blocks carry between the
+// description and the fields under it. It is a row with nothing in it and
+// nothing that fills it - the reader sees a gap in the middle of the finding.
+//
+// A row survives if it is a labelled row or the value row of the label above it,
+// which is what keeps an empty affected-hosts or proof-of-concept box - those
+// are boxes waiting for content, not gaps.
+func dropSpacerRows(tbl string) string {
+	rows := tableRows(tbl)
+
+	isLabelRow := func(ri int) bool {
+		row := tbl[rows[ri].Start:rows[ri].End]
+		for _, c := range rowCells(row) {
+			label := strings.ToLower(strings.TrimSpace(elemText(row[c.Start:c.End])))
+			if _, ok := detailLabels[label]; ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Back to front so the offsets of the rows still to come stay valid.
+	for ri := len(rows) - 1; ri >= 0; ri-- {
+		if isLabelRow(ri) {
+			continue
+		}
+		if ri > 0 && isLabelRow(ri-1) {
+			continue // the box belonging to the label above it
+		}
+		if strings.TrimSpace(elemText(tbl[rows[ri].Start:rows[ri].End])) != "" {
+			continue
+		}
+		tbl = tbl[:rows[ri].Start] + tbl[rows[ri].End:]
 	}
 	return tbl
 }

@@ -216,6 +216,43 @@ func TestLabelsCarryNoTypefaceOfTheirOwn(t *testing.T) {
 	}
 }
 
+// Most blocks carry an empty band between the description and the fields under
+// it - a row with nothing in it and nothing that fills it, which reads as a gap
+// in the middle of the finding.
+func TestNoEmptyBandsInsideAFindingTable(t *testing.T) {
+	doc := readDocxParts(t, rowsConfig())["word/document.xml"]
+
+	for _, title := range []string{
+		"SMB signing not required",
+		"Reflected XSS",
+		"Kerberoastable service account",
+		"Weak TLS ciphers",
+		"Default SNMP community string",
+		"Flat network with no segmentation",
+	} {
+		for _, tbl := range renderedFindingTables(t, doc, title) {
+			rows := tableRows(tbl)
+			isLabelRow := func(ri int) bool {
+				row := tbl[rows[ri].Start:rows[ri].End]
+				for _, c := range rowCells(row) {
+					if _, ok := detailLabels[strings.ToLower(strings.TrimSpace(elemText(row[c.Start:c.End])))]; ok {
+						return true
+					}
+				}
+				return false
+			}
+			for ri := range rows {
+				if isLabelRow(ri) || (ri > 0 && isLabelRow(ri-1)) {
+					continue // a label, or the box belonging to one
+				}
+				if strings.TrimSpace(elemText(tbl[rows[ri].Start:rows[ri].End])) == "" {
+					t.Errorf("%s: row %d is an empty band belonging to no field", title, ri)
+				}
+			}
+		}
+	}
+}
+
 // Active Directory findings are reported by endpoint, and never had an attack
 // vector to print.
 func TestActiveDirectoryDropsTheAttackVector(t *testing.T) {
