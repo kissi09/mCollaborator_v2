@@ -913,3 +913,96 @@ func TestChecklistMatchingIsPrecise(t *testing.T) {
 		})
 	}
 }
+
+// TestFindingValueTextIsNotBold pins every value a finding prints - not just the
+// recommendation - to plain body text. The template's GridTable4-Accent61 style
+// bolds the first column through its firstCol conditional format, and a value
+// cell sits in that column, so a run that stays silent about bold prints bold.
+// The client's own reports print these as prose.
+func TestFindingValueTextIsNotBold(t *testing.T) {
+	config := sampleConfig()
+	config.Findings[0].Description = "value-text-under-test"
+	config.Findings[0].AffectedSystem = "affected-under-test"
+	parts := readDocxParts(t, config)
+	doc := parts["word/document.xml"]
+
+	for _, value := range []string{"value-text-under-test", "affected-under-test"} {
+		i := strings.Index(doc, xmlEscape(value))
+		if i < 0 {
+			t.Fatalf("%q is not in the document", value)
+		}
+		run := doc[strings.LastIndex(doc[:i], "<w:r>"):i]
+		if !strings.Contains(run, `<w:b w:val="0"/>`) {
+			t.Errorf("%q does not switch bold off: %s", value, run)
+		}
+	}
+}
+
+// TestRegisterTextIsNotBold pins the vulnerability register to plain text for
+// the same reason. The criticality keeps its bold: it is a coloured badge
+// rather than prose.
+func TestRegisterTextIsNotBold(t *testing.T) {
+	config := sampleConfig()
+	parts := readDocxParts(t, config)
+	doc := parts["word/document.xml"]
+
+	// The title appears in several places; only the register's copy is under
+	// test, so start from the register's own table.
+	heading := strings.Index(doc, "Vulnerability Register")
+	if heading < 0 {
+		t.Fatal("the Vulnerability Register heading is missing")
+	}
+	tbl := strings.Index(doc[heading:], "<w:tbl>")
+	if tbl < 0 {
+		t.Fatal("no table follows the Vulnerability Register heading")
+	}
+	register := doc[heading+tbl:]
+
+	title := xmlEscape(config.Findings[0].Title)
+	i := strings.Index(register, title)
+	if i < 0 {
+		t.Fatalf("finding title %q is not in the register", title)
+	}
+	run := register[strings.LastIndex(register[:i], "<w:r>"):i]
+	if !strings.Contains(run, `<w:b w:val="0"/>`) {
+		t.Errorf("register row does not switch bold off: %.200s", run)
+	}
+}
+
+// TestOnlyTheDescriptionRowKeepsTheBand pins the shading the client's reports
+// use: the peach band behind the description and its rating, white under every
+// other label. The band is the table style's band1Horz (FDE9D9) and it applies
+// to every value row, so the cells that must be white say so themselves.
+func TestOnlyTheDescriptionRowKeepsTheBand(t *testing.T) {
+	config := sampleConfig()
+	config.Findings[0].Description = "banded-description"
+	config.Findings[0].AffectedSystem = "white-affected"
+	config.Findings[0].Recommendation = "White recommendation body."
+	parts := readDocxParts(t, config)
+	doc := parts["word/document.xml"]
+
+	// A value that must be white carries an explicit white fill in its cell.
+	for _, value := range []string{"white-affected", "White recommendation body."} {
+		i := strings.Index(doc, xmlEscape(value))
+		if i < 0 {
+			t.Fatalf("%q is not in the document", value)
+		}
+		cellStart := strings.LastIndex(doc[:i], "<w:tc>")
+		if cellStart < 0 {
+			t.Fatalf("%q is not inside a table cell", value)
+		}
+		if !strings.Contains(doc[cellStart:i], `w:fill="`+cellFillWhite+`"`) {
+			t.Errorf("the cell holding %q is not filled white, so it keeps the table style band", value)
+		}
+	}
+
+	// The description keeps the band, so it must NOT be given a white fill.
+	i := strings.Index(doc, xmlEscape("banded-description"))
+	if i < 0 {
+		t.Fatal("description is not in the document")
+	}
+	cellStart := strings.LastIndex(doc[:i], "<w:tc>")
+	if strings.Contains(doc[cellStart:i], `w:fill="`+cellFillWhite+`"`) {
+		t.Error("the description cell was filled white; it should keep the peach band")
+	}
+}

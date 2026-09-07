@@ -1480,14 +1480,14 @@ func fillDetailTable(tbl string, values map[string]string, pocXML string) string
 		switch jb.key {
 		case "rating":
 			if value == "" {
-				continue
+				break
 			}
 			cell = setSeverityBadge(cell, value, severityHex(value))
 		case "poc":
 			cell = setPOCCell(cell, value, pocXML)
 		case "recommendation":
 			if value == "" {
-				continue
+				break
 			}
 			// The recommendation cell holds two paragraphs: the
 			// "<VulnID> - <Header>" naming line, which stays bold, and the
@@ -1497,9 +1497,24 @@ func fillDetailTable(tbl string, values map[string]string, pocXML string) string
 			cell, _ = setFirstEmptyParaTextUnbolded(cell, value)
 		default:
 			if value == "" {
-				continue
+				break
 			}
-			cell, _ = setFirstEmptyParaText(cell, value)
+			// Every value reads as body text, not as a heading. The table
+			// style's firstCol format bolds the column these cells sit in, so
+			// - exactly as for the recommendation - it has to be switched off
+			// run by run rather than merely left unset.
+			cell, _ = setFirstEmptyParaTextUnbolded(cell, value)
+		}
+
+		// The shading is applied whether or not there was a value to write: a
+		// row left empty still carries the table style's band, and an empty
+		// peach row is exactly as wrong as a filled one.
+
+		// The peach band belongs to the description and its rating. Every other
+		// value cell is white in the client's own reports, and the band comes
+		// from the table style, so the cell has to say so itself.
+		if jb.key != "description" && jb.key != "rating" {
+			cell = withCellFill(cell, cellFillWhite)
 		}
 
 		row = row[:cells[jb.cellIdx].Start] + cell + row[cells[jb.cellIdx].End:]
@@ -1597,7 +1612,9 @@ func renderVulnerabilityRegister(doc string, findings []numberedFinding) string 
 			if ci == 2 {
 				cell = setSeverityBadge(cell, values[ci], severityHex(f.Severity))
 			} else {
-				cell, _ = setFirstEmptyParaText(cell, values[ci])
+				// Register rows read as body text. The criticality keeps its
+				// bold because it is a coloured badge, not prose.
+				cell, _ = setFirstEmptyParaTextUnbolded(cell, values[ci])
 			}
 			row = row[:cells[ci].Start] + cell + row[cells[ci].End:]
 		}
