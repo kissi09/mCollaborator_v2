@@ -96,3 +96,118 @@ func uniqueStrings(in []string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// The class guard above only sees class names written as literals. A pill whose
+// class is built from data - class="status-pill ${e.status}" - is invisible to
+// it, and that is exactly how a project's status renders. The New Project modal
+// offered planning, in_progress and review; app.css defined only in_progress,
+// so two of the three statuses a user can choose drew a pill with no
+// background, no colour and no border.
+func TestEveryProjectStatusHasAPill(t *testing.T) {
+	pages, err := os.ReadFile(filepath.Join("static", "js", "pages.js"))
+	if err != nil {
+		t.Fatalf("read pages.js: %v", err)
+	}
+	css, err := os.ReadFile(filepath.Join("static", "css", "app.css"))
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+
+	// The statuses the New Project modal actually offers.
+	body := string(pages)
+	start := strings.Index(body, `id="ne-status"`)
+	if start < 0 {
+		t.Fatal("could not find the status select in the New Project modal")
+	}
+	end := strings.Index(body[start:], "</select>")
+	if end < 0 {
+		t.Fatal("status select is not closed")
+	}
+	block := body[start : start+end]
+
+	var statuses []string
+	for _, part := range strings.Split(block, `value="`)[1:] {
+		if q := strings.Index(part, `"`); q >= 0 {
+			statuses = append(statuses, part[:q])
+		}
+	}
+	if len(statuses) == 0 {
+		t.Fatal("no statuses found in the modal")
+	}
+
+	for _, st := range statuses {
+		if !strings.Contains(string(css), ".status-pill."+st+" ") {
+			t.Errorf("status %q can be chosen in the New Project modal but app.css has no .status-pill.%s rule - the pill renders unstyled", st, st)
+		}
+	}
+
+	// A project can also be marked completed, which the dashboard shows.
+	for _, st := range []string{"completed", "closed"} {
+		if !strings.Contains(string(css), ".status-pill."+st+" ") {
+			t.Errorf("app.css has no .status-pill.%s rule", st)
+		}
+	}
+}
+
+// Severity chips on a project card are built the same way, from the finding's
+// own severity, so they are equally invisible to the literal-class guard.
+func TestEverySeverityHasABadge(t *testing.T) {
+	css, err := os.ReadFile(filepath.Join("static", "css", "app.css"))
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+	for _, sev := range []string{"critical", "high", "medium", "low", "info"} {
+		if !strings.Contains(string(css), ".badge-severity."+sev+" ") {
+			t.Errorf("app.css has no .badge-severity.%s rule - the chip renders unstyled", sev)
+		}
+	}
+}
+
+// A status pill is written as class="status-pill ${e.status}" and a severity
+// chip as class="badge-severity ${sev}", so the bare word becomes a class in
+// its own right. If the stylesheet also defines a rule for that bare word,
+// every pill silently inherits it.
+//
+// That is not hypothetical. The finding-import board's page container was
+// called .review - "display:flex; height: calc(100vh - var(--topbar-height))" -
+// and a project whose status is review therefore rendered its pill as a column
+// the full height of the window, which pushed the rest of the card off the
+// screen. It looked like a spacing bug and was a name collision.
+func TestNoBareStatusOrSeverityClassInTheStylesheet(t *testing.T) {
+	css, err := os.ReadFile(filepath.Join("static", "css", "app.css"))
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+
+	// Words that reach the markup as a standalone class.
+	reserved := []string{
+		// engagement and finding statuses
+		"planning", "in_progress", "review", "completed", "closed", "open",
+		"draft", "mitigated", "verified",
+		// severities
+		"critical", "high", "medium", "low", "info",
+	}
+
+	for _, line := range strings.Split(string(css), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, ".") {
+			continue
+		}
+		// The selector is everything before the declaration block.
+		sel, _, found := strings.Cut(trimmed, "{")
+		if !found {
+			continue
+		}
+		sel = strings.TrimSpace(sel)
+		for _, word := range reserved {
+			// A rule for the bare word alone, e.g. ".review" or ".review, .x".
+			for _, part := range strings.Split(sel, ",") {
+				if strings.TrimSpace(part) == "."+word {
+					t.Errorf("app.css defines a bare %q rule. That word is emitted as a standalone class "+
+						"by a status pill or severity chip, so every one of them would inherit this rule. "+
+						"Give the page class a name of its own, e.g. .import-%s", "."+word, word)
+				}
+			}
+		}
+	}
+}

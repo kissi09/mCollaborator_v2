@@ -382,7 +382,52 @@ function completedWithinDays(e, days) {
   if (isNaN(when)) return false;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
-  return when >= cutoff && when <= new Date();
+  // No upper bound. A project is marked completed by hand, and its end date is
+  // the date it was scheduled to end - which is often still in the future when
+  // the work finishes early. Requiring the date to have passed dropped such a
+  // project out of Recently Completed while its status already kept it out of
+  // Active, so it appeared nowhere on the dashboard at all.
+  return when >= cutoff;
+}
+
+// findingSummaryHtml is the line on a project card that says what is inside it.
+// Without it a card names a client and counts targets, and a project holding
+// forty-seven imported findings looks exactly like an empty one.
+function findingSummaryHtml(findings) {
+  if (!findings) {
+    return '<div class="project-card-findings"><span class="project-card-total">Loading findings…</span></div>';
+  }
+  if (!findings.length) {
+    return '<div class="project-card-findings"><span class="project-card-total">No findings yet</span></div>';
+  }
+  const counts = {};
+  findings.forEach(f => {
+    const sev = (f.severity || 'info').toLowerCase();
+    counts[sev] = (counts[sev] || 0) + 1;
+  });
+  const chips = SEVERITY_ORDER
+    .filter(sev => counts[sev])
+    .map(sev => `<span class="badge-severity ${sev}">${counts[sev]} ${sev}</span>`)
+    .join('');
+  return `<div class="project-card-findings">${chips}<span class="project-card-total">${findings.length} finding${findings.length === 1 ? '' : 's'}</span></div>`;
+}
+
+// loadFindingsByEngagement fetches each project's findings in parallel. One
+// request per project is fine at this scale and needs no new endpoint; a
+// project whose findings cannot be read reports itself rather than failing the
+// whole dashboard.
+async function loadFindingsByEngagement(engagements) {
+  const pairs = await Promise.all(engagements.map(async e => {
+    try {
+      const res = await api.get(`/engagements/${e.id}/findings`);
+      return [e.id, res.data || []];
+    } catch (err) {
+      return [e.id, null];
+    }
+  }));
+  const byId = {};
+  pairs.forEach(([id, list]) => { byId[id] = list; });
+  return byId;
 }
 
 async function afterRenderLedgerDashboard() {
@@ -404,6 +449,8 @@ async function afterRenderLedgerDashboard() {
     document.getElementById('ledger-completed-count').textContent =
       `${completed.length} in the last 90 days`;
 
+    const findingsById = await loadFindingsByEngagement(engagements);
+
     document.getElementById('ledger-project-list').innerHTML = active.length ? active.map(e => {
       const run = engagementProgress(e);
       return `
@@ -423,6 +470,7 @@ async function afterRenderLedgerDashboard() {
               <div class="ws-meter"><span style="width:${run.pct}%;background:${run.tone};"></span></div>
               <div class="text-xs text-muted mt-1">${sanitizeInput(run.label)}</div>
             </div>` : ''}
+          ${findingSummaryHtml(findingsById[e.id])}
         </div>
         <span class="project-card-go">&rarr;</span>
       </a>`;
@@ -442,6 +490,7 @@ async function afterRenderLedgerDashboard() {
             <span style="color:var(--border);margin:0 8px;">|</span>
             <span class="font-mono text-xs">completed ${timeAgo(engagementCompletedAt(e))}</span>
           </p>
+          ${findingSummaryHtml(findingsById[e.id])}
         </div>
         <span class="project-card-go">&rarr;</span>
       </a>
@@ -2834,7 +2883,7 @@ function renderExtractionReview() {
       </div>`;
   }
   return `
-    <div class="review" style="margin:-24px;">
+    <div class="import-review" style="margin:-24px;">
       <div id="review-head"></div>
       <div class="review-hint">
         &#9889; Each finding was placed by its section heading, or by its wording where the heading did not say.

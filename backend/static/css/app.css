@@ -215,6 +215,13 @@ input, textarea, select, button { font-family: inherit; }
 .status-pill.verified { background: color-mix(in srgb, #22C55E 15%, transparent); color: #22C55E; border: 1px solid color-mix(in srgb, #22C55E 30%, transparent); }
 .status-pill.closed { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); border: 1px solid color-mix(in srgb, var(--muted) 30%, transparent); }
 .status-pill.draft { background: color-mix(in srgb, #8B5CF6 15%, transparent); color: #8B5CF6; border: 1px solid color-mix(in srgb, #8B5CF6 30%, transparent); }
+/* A project's own statuses. The New Project modal offers exactly planning,
+   in_progress and review, and only in_progress was ever styled - so a project
+   in either of the other two drew its pill with no background, no colour and no
+   border, which reads as a gap in the card rather than as a status. */
+.status-pill.planning { background: color-mix(in srgb, #38BDF8 15%, transparent); color: #38BDF8; border: 1px solid color-mix(in srgb, #38BDF8 30%, transparent); }
+.status-pill.review { background: color-mix(in srgb, #14B8A6 15%, transparent); color: #14B8A6; border: 1px solid color-mix(in srgb, #14B8A6 30%, transparent); }
+.status-pill.completed { background: color-mix(in srgb, #22C55E 15%, transparent); color: #22C55E; border: 1px solid color-mix(in srgb, #22C55E 30%, transparent); }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -320,6 +327,13 @@ input, textarea, select, button { font-family: inherit; }
 .project-card h4 { margin: 0; }
 .project-card p { margin: 0; line-height: 1.6; }
 .project-card-go { color: var(--muted); flex-shrink: 0; line-height: 1.4; }
+
+/* What the project actually holds. A card that names a client and counts its
+   targets says nothing about the findings inside it, so importing forty-seven
+   of them changed nothing anyone could see on the dashboard. */
+.project-card-findings { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.project-card-findings .badge-severity { border-radius: var(--radius); }
+.project-card-findings .project-card-total { font-size: 12px; color: var(--text-muted); margin-left: 2px; }
 .project-card:hover .project-card-go { color: var(--primary); }
 
 /* The section rules above each list needed the padding that .pb-2 never had. */
@@ -544,7 +558,13 @@ input, textarea, select, button { font-family: inherit; }
 }
 
 /* ============ REVIEW EXTRACTED FINDINGS ============ */
-.review {
+/* The import review board's page container.
+   It was called .review, which collided with the project status of the same
+   name: a status pill is written as class="status-pill ${status}", so every
+   project in review picked this rule up and inherited a full-viewport height.
+   The pill grew into a column the height of the window and pushed the rest of
+   the card off the screen. A page container needs a name no status can take. */
+.import-review {
   display: flex; flex-direction: column;
   height: calc(100vh - var(--topbar-height));
   overflow: hidden;
