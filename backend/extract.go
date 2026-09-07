@@ -296,13 +296,38 @@ func ExtractFromDOCX(data []byte) ([]ExtractedFinding, []string, error) {
 		paraSinceTbl bool
 		sawTable     bool
 		pending      *ExtractedFinding
+		pocLines     []string
+		recLines     []string
+		section      string
+		skipped      int
 	)
 
-	flush := func() {
+	// flush finalises the finding being built. trailing, when given, is the
+	// paragraph that named the *next* finding: nothing in the document closes a
+	// recommendation run, so that title is sitting at the end of it.
+	flush := func(trailing string) {
 		if pending != nil {
-			out = append(out, *pending)
+			if trailing != "" {
+				pocLines = dropTrailing(pocLines, trailing)
+				recLines = dropTrailing(recLines, trailing)
+			}
+			if pending.POC == "" {
+				pending.POC = strings.TrimSpace(strings.Join(pocLines, "\n"))
+			}
+			if pending.Remediation == "" {
+				pending.Remediation = strings.TrimSpace(strings.Join(recLines, "\n"))
+			}
+			if isPlaceholderFinding(pending) {
+				// A draft's unwritten finding: every field is XXXX. Importing it
+				// would put an empty row in the engagement for someone to find
+				// and delete.
+				skipped++
+			} else {
+				out = append(out, *pending)
+			}
 			pending = nil
 		}
+		pocLines, recLines, section = nil, nil, ""
 	}
 
 	for _, c := range children {
@@ -313,9 +338,47 @@ func ExtractFromDOCX(data []byte) ([]ExtractedFinding, []string, error) {
 			if text == "" {
 				continue
 			}
+			// A section title is not always a Heading style. This report names
+			// its areas in bold numbered list paragraphs, and the app's own
+			// template has been caught styling headings by hand too. An exact
+			// match against an area's own name is decisive however the
+			// paragraph is styled, so test every short one.
+			if len(text) <= areaTitleMaxLen {
+				if code, label, ok := areaFromHeading(text); ok {
+					flush(text)
+					headingArea, headingLabel = code, label
+					lastPara = ""
+					paraSinceTbl = true
+					continue
+				}
+			}
+
+			// "PoC:" and "Recommendations:" introduce runs of paragraphs that
+			// belong to the finding above them but sit outside its table.
+			if pending != nil {
+				switch {
+				case pocHeadingRe.MatchString(text):
+					section = "poc"
+					lastPara = ""
+					paraSinceTbl = true
+					continue
+				case recHeadingRe.MatchString(text):
+					section = "rec"
+					lastPara = ""
+					paraSinceTbl = true
+					continue
+				}
+				switch section {
+				case "poc":
+					pocLines = append(pocLines, text)
+				case "rec":
+					recLines = append(recLines, text)
+				}
+			}
+
 			if isHeading(c.Style) {
 				if code, label, ok := areaFromHeading(text); ok {
-					flush()
+					flush(text)
 					headingArea, headingLabel = code, label
 					lastPara = ""
 					paraSinceTbl = true
@@ -339,8 +402,8 @@ func ExtractFromDOCX(data []byte) ([]ExtractedFinding, []string, error) {
 		// A finding's table names what it is describing. The vulnerability
 		// register also carries a Recommendation column, so recognising a table
 		// by that alone would read the register as one more finding.
-		hasDesc := tableHasLabel(frag, "description")
-		hasAffected := tableHasLabel(frag, "affected")
+		hasDesc := extractTableHasLabel(frag, "description")
+		hasAffected := extractTableHasLabel(frag, "affected")
 		if !hasDesc && !hasAffected {
 			continue
 		}
@@ -359,7 +422,7 @@ func ExtractFromDOCX(data []byte) ([]ExtractedFinding, []string, error) {
 			continue
 		}
 
-		flush()
+		flush(lastPara)
 		if f.Title == "" {
 			f.Title = lastPara
 		}
@@ -374,13 +437,22 @@ func ExtractFromDOCX(data []byte) ([]ExtractedFinding, []string, error) {
 		lastPara = ""
 		paraSinceTbl = false
 	}
-	flush()
+	flush("")
+
+	if skipped > 0 {
+		notes = append(notes, fmt.Sprintf("%d finding%s in the document were left as XXXX placeholders and were not imported.", skipped, map[bool]string{true: "", false: "s"}[skipped == 1]))
+	}
 
 	if !sawTable {
 		notes = append(notes, "No finding tables were recognised, so nothing could be read from this document. A report laid out as a table of Description, Rating and Recommendation rows reads best.")
 	}
 	return out, notes, nil
 }
+
+// areaTitleMaxLen keeps the whole-paragraph area test to things that could
+// plausibly be a section title rather than a sentence that happens to end in
+// an area's name.
+const areaTitleMaxLen = 80
 
 // areaFromHeading matches a heading against the assessment areas, tolerating a
 // leading section number ("3.7 Configuration Files Review").
@@ -407,7 +479,11 @@ func cleanTitle(s string) string {
 	if vulnHeadingRe.MatchString(s) {
 		return ""
 	}
-	return strings.TrimSpace(stripSectionNumber(s))
+	s = strings.TrimSpace(stripSectionNumber(s))
+	if trimmed := strings.TrimSpace(editorialSuffixRe.ReplaceAllString(s, "")); trimmed != "" {
+		s = trimmed
+	}
+	return s
 }
 
 // mergeFinding folds a continuation table into the finding it belongs to,
@@ -463,10 +539,164 @@ func recommendationFromCell(cell string) string {
 // findingFromTable reads the labelled rows of one finding table. It is the
 // inverse of fillDetailTable: the label row names the field, the row under it
 // holds the value.
+// Reading a report that was not written by this app.
+//
+// The renderer's own layout puts a row of labels above a row of values, and
+// detailLabels is the exact vocabulary it prints. A report written by hand does
+// neither: the ECG draft lays every finding out as a two-column table with the
+// label beside its value, and calls the rows "Severity:", "Affected URL" and
+// "CVSS 3.1" rather than "Rating", "Affected Hosts" and "CVSS Vector". Fifty-five
+// findings were laid out that way and five were read - the five whose labels
+// happened to carry no trailing colon.
+//
+// So the extractor keeps its own vocabulary, a superset of the renderer's.
+// detailLabels stays exactly as it is: the renderer resolves real template
+// cells through it and must not start matching things the template never
+// prints.
+
+// extractLabels is detailLabels plus the spellings found in reports written
+// outside this app. Keys are normalised by normalizeLabel, so no entry here
+// needs its own punctuation or casing variants.
+var extractLabels = func() map[string]string {
+	m := make(map[string]string, len(detailLabels)+24)
+	for k, v := range detailLabels {
+		m[normalizeLabel(k)] = v
+	}
+	for k, v := range map[string]string{
+		"severity":                 "rating",
+		"risk":                     "rating",
+		"risk rating":              "rating",
+		"risk level":               "rating",
+		"cvss":                     "cvss",
+		"cvss 3.1":                 "cvss",
+		"cvss v3.1":                "cvss",
+		"cvss 3.1 vector":          "cvss",
+		"vector string":            "cvss",
+		"affected url":             "affected",
+		"affected urls":            "affected",
+		"affected app":             "affected",
+		"affected apps":            "affected",
+		"affected app & endpoint":  "affected",
+		"affected app & endpoints": "affected",
+		"affected endpoints":       "affected",
+		"affected system":          "affected",
+		"affected systems":         "affected",
+		"affected asset":           "affected",
+		"affected assets":          "affected",
+		"proof of concept":         "poc",
+		"remediation":              "recommendation",
+		"recommendations":          "recommendation",
+		"mitigation":               "recommendation",
+	} {
+		m[k] = v
+	}
+	return m
+}()
+
+// normalizeLabel reduces a label cell to the form extractLabels is keyed by.
+// A hand-written report is inconsistent about the trailing colon and the
+// casing - "Severity:", "Severity" and "SEVERITY" are one label - and about
+// the spaces around an ampersand.
+func normalizeLabel(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimRight(s, " 	:. ")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// extractLabelKey resolves a cell's text to a finding field, or reports that
+// the cell is not a label at all.
+func extractLabelKey(text string) (string, bool) {
+	key, ok := extractLabels[normalizeLabel(text)]
+	return key, ok
+}
+
+// extractTableHasLabel is tableHasLabel over the wider vocabulary. The renderer
+// keeps its own; this one decides whether a table is a finding worth reading.
+func extractTableHasLabel(tbl, key string) bool {
+	for _, r := range tableRows(tbl) {
+		row := tbl[r.Start:r.End]
+		for _, c := range rowCells(row) {
+			if k, ok := extractLabelKey(elemText(row[c.Start:c.End])); ok && k == key {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// A hand-written report marks its sections and its extra fields in ways the
+// renderer never does, and all of them have to be read off the page rather than
+// off a style.
+
+// editorialSuffixRe strips the working notes a draft carries in its titles -
+// "- Done", "– Done (Added to 1.9)", "– Dup". They are the author talking to
+// themselves, not part of the finding's name.
+var editorialSuffixRe = regexp.MustCompile(`(?i)\s*[-–—]\s*(done|dup(licate)?s?|pending|todo|wip|n/?a)\b.*$`)
+
+// pocHeadingRe and recHeadingRe are the paragraphs that introduce a finding's
+// proof and its fix. In this layout neither is a row of the table - they follow
+// it as ordinary bold paragraphs, so a finding read from the table alone loses
+// both.
+var pocHeadingRe = regexp.MustCompile(`(?i)^\s*(poc|proof of concept)\s*:?\s*$`)
+var recHeadingRe = regexp.MustCompile(`(?i)^\s*(recommendations?|remediations?|mitigations?)\s*:?\s*$`)
+
+// draftPlaceholderRe matches the XXXX a draft leaves where a field is not written
+// yet. Eight of the ECG draft's fifty-five finding tables were entirely this.
+var draftPlaceholderRe = regexp.MustCompile(`^[\s.–-]*[xX]{2,}[\s.–-]*$`)
+
+func isPlaceholderText(s string) bool { return draftPlaceholderRe.MatchString(strings.TrimSpace(s)) }
+
+// isPlaceholderFinding reports a finding that carries no written content at
+// all. Importing these would put empty rows in an engagement that a person then
+// has to find and delete.
+func isPlaceholderFinding(f *ExtractedFinding) bool {
+	filled := 0
+	for _, v := range []string{f.Title, f.Description, f.Impact, f.AffectedSystem, f.CVSSVector} {
+		if strings.TrimSpace(v) != "" && !isPlaceholderText(v) {
+			filled++
+		}
+	}
+	return filled == 0
+}
+
+// dropTrailing removes a trailing paragraph equal to text. The paragraph that
+// names the next finding sits inside the previous finding's recommendation run,
+// because nothing in the document closes that run.
+func dropTrailing(lines []string, text string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == strings.TrimSpace(text) {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
 func findingFromTable(tbl string) ExtractedFinding {
 	var f ExtractedFinding
 	rows := tableRows(tbl)
 
+	// Label beside value, one row per field. This is how a report written
+	// outside the app tends to be laid out, and it is unambiguous: a row whose
+	// first cell is a label and whose second cell is not.
+	for _, r := range rows {
+		row := tbl[r.Start:r.End]
+		cells := rowCells(row)
+		if len(cells) < 2 {
+			continue
+		}
+		key, ok := extractLabelKey(elemText(row[cells[0].Start:cells[0].End]))
+		if !ok {
+			continue
+		}
+		valueCell := row[cells[1].Start:cells[1].End]
+		// The renderer's own layout puts labels side by side - "Description"
+		// next to "Rating" - above the row holding their values. Reading that
+		// horizontally would file one label as another's value.
+		if _, alsoLabel := extractLabelKey(elemText(valueCell)); alsoLabel {
+			continue
+		}
+		setFindingField(&f, key, cellText(valueCell), valueCell)
+	}
+
+	// Label row above value row, which is what this app's own template prints.
 	for ri := 0; ri+1 < len(rows); ri++ {
 		row := tbl[rows[ri].Start:rows[ri].End]
 		next := tbl[rows[ri+1].Start:rows[ri+1].End]
@@ -475,8 +705,7 @@ func findingFromTable(tbl string) ExtractedFinding {
 			continue
 		}
 		for ci, c := range rowCells(row) {
-			label := strings.ToLower(strings.TrimSpace(elemText(row[c.Start:c.End])))
-			key, ok := detailLabels[label]
+			key, ok := extractLabelKey(elemText(row[c.Start:c.End]))
 			if !ok {
 				continue
 			}
@@ -485,28 +714,7 @@ func findingFromTable(tbl string) ExtractedFinding {
 				target = 0
 			}
 			cell := next[nextCells[target].Start:nextCells[target].End]
-			value := cellText(cell)
-			if value == "" {
-				continue
-			}
-			switch key {
-			case "description":
-				f.Description = value
-			case "impact":
-				f.Impact = value
-			case "rating":
-				f.Severity = normalizeSeverity(value)
-			case "cvss":
-				f.CVSSVector = value
-			case "attackvector":
-				f.AttackVector = value
-			case "affected":
-				f.AffectedSystem = value
-			case "poc":
-				f.POC = value
-			case "recommendation":
-				f.Remediation = recommendationFromCell(cell)
-			}
+			setFindingField(&f, key, cellText(cell), cell)
 		}
 	}
 
@@ -517,6 +725,59 @@ func findingFromTable(tbl string) ExtractedFinding {
 		f.Severity = "info"
 	}
 	return f
+}
+
+// setFindingField files one label's value. It never overwrites something
+// already read, so whichever layout matched first wins and a stray second
+// match cannot undo it.
+func setFindingField(f *ExtractedFinding, key, value, cell string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	switch key {
+	case "description":
+		if f.Description == "" {
+			f.Description = value
+		}
+	case "impact":
+		if f.Impact == "" {
+			f.Impact = value
+		}
+	case "rating":
+		if f.Severity == "" {
+			f.Severity = normalizeSeverity(value)
+		}
+		// A hand-written rating cell often carries the score with the word:
+		// "High (7.5)", "Critical(9.5)", "HIGH 7.5". The score is worth keeping
+		// and is not recorded anywhere else in these reports.
+		if f.CVSSScore == 0 {
+			if m := cvssScoreRe.FindString(value); m != "" {
+				if n, err := strconv.ParseFloat(m, 64); err == nil {
+					f.CVSSScore = n
+				}
+			}
+		}
+	case "cvss":
+		if f.CVSSVector == "" {
+			f.CVSSVector = value
+		}
+	case "attackvector":
+		if f.AttackVector == "" {
+			f.AttackVector = value
+		}
+	case "affected":
+		if f.AffectedSystem == "" {
+			f.AffectedSystem = value
+		}
+	case "poc":
+		if f.POC == "" {
+			f.POC = value
+		}
+	case "recommendation":
+		if f.Remediation == "" {
+			f.Remediation = recommendationFromCell(cell)
+		}
+	}
 }
 
 // recIDRe matches the "<Initials>_REC<n>_<AREA><n> - <header>" line the template
