@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -510,6 +511,19 @@ func HandleExtractFindings(store *Store) http.HandlerFunc {
 			return
 		}
 
+		// What arrived is worth recording whatever happens next: an upload that
+		// loses its body on the way looks identical to a file in the wrong
+		// format once the parser has had it, and only one of those is the
+		// tester's fault.
+		log.Printf("extract: %q ext=%s received=%d bytes declared=%s head=%s",
+			name, ext, len(data), r.Header.Get("Content-Length"), describeHead(data))
+
+		if err := sniffDocument(data, ext); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, ApiResponse{
+				Error: &ApiError{Code: "UNREADABLE_DOCUMENT", Message: err.Error()}})
+			return
+		}
+
 		var (
 			findings []ExtractedFinding
 			notes    []string
@@ -522,7 +536,7 @@ func HandleExtractFindings(store *Store) http.HandlerFunc {
 		case ".pdf":
 			kind = "pdf"
 			var text string
-			text, err = pdfPlainText(data)
+			text, err = pdfPlainText(trimPDFPreamble(data))
 			if err == nil {
 				findings, notes = ExtractFromPDFText(text)
 			}
