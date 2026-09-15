@@ -88,6 +88,8 @@ var areaKeywords = map[string][]string{
 	"WPT":  {"cross-site", "xss", "sql injection", "sqli", "csrf", "session cookie", "web application", "http header", "owasp", "endpoint", "login form"},
 	"CFG":  {"configuration file", "running config", "snmp community", "firewall rule", "switch configuration", "router configuration", "banner", "nipper", "acl"},
 	"ASA":  {"rest api", "api endpoint", "swagger", "openapi", "graphql", "api key", "bearer token"},
+	"MPT":  {"android", "ios app", "apk", "ipa", "mobile application", "mobile app", "jailbreak", "jailbroken", "root detection", "rooted device", "certificate pinning", "ssl pinning", "frida", "keychain", "shared preferences"},
+	"SCR":  {"source code", "hardcoded", "hard-coded", "static analysis", "sast", "code review", "semgrep", "sonarqube", "codebase"},
 	"ADT":  {"active directory", "kerberos", "kerberoast", "spn", "group policy", "domain admin", "ldap", "asrep", "bloodhound"},
 	"WNA":  {"wireless", "ssid", "wpa", "wep", "access point", "wifi", "wi-fi", "802.11", "evil twin", "deauthentication"},
 	"NAR":  {"network architecture", "segmentation", "vlan", "topology", "network design", "out-of-band", "dmz", "broadcast domain"},

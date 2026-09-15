@@ -53,6 +53,16 @@ var areaRisks = map[string]areaRisk{
 		Cause:  "security controls are not consistently enforced on the APIs",
 		Impact: "unauthorized access to the data and business functions exposed through the APIs",
 	},
+	"MPT": {
+		Theme:  "insecure data storage and communication in the mobile applications",
+		Cause:  "the mobile applications have not been built and tested against a mobile security standard",
+		Impact: "exposure of user data held on mobile devices and abuse of the back-end services the applications rely on",
+	},
+	"SCR": {
+		Theme:  "insecure coding practices in the application source code",
+		Cause:  "secure coding practices are not consistently applied during development",
+		Impact: "exploitation of flaws built into the applications themselves, leading to unauthorized access to their data and functions",
+	},
 	"ADT": {
 		Theme:  "privilege escalation paths in Active Directory",
 		Cause:  "privileged access in the directory is not tightly governed",
@@ -269,15 +279,17 @@ func riskPractical(hit []string, sorted []numberedFinding) string {
 			grave[f.Area.Code] = true
 		}
 	}
-	external, internal, review := false, false, false
-	for _, code := range hit {
-		if !grave[code] {
+	external, internal, review, code := false, false, false, false
+	for _, c := range hit {
+		if !grave[c] {
 			continue
 		}
-		switch areaNarratives[code].Mode {
-		case "remote":
+		switch {
+		case c == "SCR":
+			code = true
+		case areaNarratives[c].Mode == "remote":
 			external = true
-		case "onsite":
+		case areaNarratives[c].Mode == "onsite":
 			internal = true
 		default:
 			review = true
@@ -293,6 +305,9 @@ func riskPractical(hit []string, sorted []numberedFinding) string {
 	}
 	if review {
 		clauses = append(clauses, "the weaknesses identified would make it considerably easier for an attacker who reaches the network to take control of network devices and move between parts of the network")
+	}
+	if code {
+		clauses = append(clauses, "the flaws identified in the source code are present in every deployment of the applications, giving an attacker who can reach them a direct route to their data and functions")
 	}
 	if len(clauses) == 0 {
 		return ""

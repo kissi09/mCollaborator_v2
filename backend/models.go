@@ -86,7 +86,7 @@ type Finding struct {
 	CWEs           []string `json:"cwes,omitempty"`
 	MitreAttackIDs []string `json:"mitre_attack_ids,omitempty"`
 	// Category is the assessment area this finding is reported under (IPT, EPT,
-	// IPTC, WPT, CFG, ASA, ADT, WNA, NAR). It decides which chapter 3 section of
+	// IPTC, WPT, CFG, ASA, MPT, SCR, ADT, WNA, NAR). It decides which chapter 3 section of
 	// the report the finding prints in and which bar of the findings-by-area
 	// chart it counts towards.
 	Category string `json:"category,omitempty"`

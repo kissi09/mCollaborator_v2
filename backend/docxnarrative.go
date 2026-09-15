@@ -74,6 +74,20 @@ var areaNarratives = map[string]areaNarrative{
 		Secure:  "The APIs appear to enforce authentication, authorisation and input validation appropriately.",
 		Concern: "The APIs contain weaknesses in how requests are authenticated, authorised or validated, which could expose the data and functions behind them.",
 	},
+	"MPT": {
+		Assessed: "mobile applications", Activity: "mobile applications",
+		Mode: "remote", Target: "the mobile applications",
+		Subject: "the mobile applications", Plural: true,
+		Secure:  "The mobile applications appear to be well secured overall, with data stored on the device and exchanged with back-end services appropriately protected.",
+		Concern: "The mobile applications contain weaknesses that could be exploited to expose data stored on the device or exchanged with back-end services, or to bypass the controls the applications enforce.",
+	},
+	"SCR": {
+		Assessed: "application source code", Activity: "the application source code",
+		Mode: "review", Target: "the application source code",
+		Subject: "the reviewed source code",
+		Secure:  "The reviewed source code appears to follow secure coding practice overall, with input handling, authentication and the protection of sensitive data largely implemented correctly.",
+		Concern: "The reviewed source code contains flaws in how input, authentication or sensitive data are handled that an attacker could exploit in the running application.",
+	},
 	"ADT": {
 		Assessed: "Active Directory environment", Activity: "the Active Directory environment",
 		Mode: "onsite", Target: "the Active Directory environment",
@@ -286,15 +300,26 @@ func scopeParagraph(areas []string) string {
 // in a review. With any testing area selected the template's account stands,
 // and both results are empty.
 func reviewMethodParagraphs(areas []string) (string, string) {
-	var material, standard []string
+	var material, standard, causes, processes []string
 	for _, code := range areas {
 		switch code {
 		case "CFG":
 			material = append(material, "the configuration files of the in-scope devices")
 			standard = append(standard, "security hardening best practice")
+			causes = append(causes, "configuration errors", "unsupported software")
+			processes = append(processes, "security hardening processes for devices and services")
 		case "NAR":
 			material = append(material, "the network design documentation")
 			standard = append(standard, "secure network design principles")
+			causes = append(causes, "weaknesses in network design")
+			if len(processes) == 0 {
+				processes = append(processes, "security hardening processes for devices and services")
+			}
+		case "SCR":
+			material = append(material, "the application source code")
+			standard = append(standard, "secure coding best practice")
+			causes = append(causes, "insecure coding practices")
+			processes = append(processes, "secure development processes")
 		default:
 			return "", ""
 		}
@@ -303,8 +328,8 @@ func reviewMethodParagraphs(areas []string) (string, string) {
 		" were collected. These were then examined against " + joinWithAnd(standard) +
 		", and every deviation identified was verified and recorded for a comprehensive summarization with this report."
 	analysis := "The discovered issues were thoroughly analyzed to establish their effect on the security of the environment. " +
-		"Security issues can arise from configuration errors, unsupported software and weaknesses in network design, " +
-		"and many of them result from a lack of security hardening processes for devices and services."
+		"Security issues can arise from " + joinWithAnd(causes) +
+		", and many of them result from a lack of " + joinWithAnd(processes) + "."
 	return recon, analysis
 }
 

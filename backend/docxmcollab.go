@@ -46,6 +46,10 @@ var reportAreas = []areaDef{
 	{"WPT", "Web Application Penetration Testing", "Web Application Testing", "Web Application Penetration Testing", "Web Apps"},
 	{"CFG", "Configuration Files Review", "Configuration Files Review", "Configuration Files Review", "Config Review"},
 	{"ASA", "API Security Assessment", "API Security Assessment", "", "APIs"},
+	// Neither has a block, a scope row or a naming convention line in the
+	// template; all three are built as the report renders.
+	{"MPT", "Mobile Penetration Testing", "Mobile Penetration Testing", "", "Mobile Apps"},
+	{"SCR", "Source Code Review", "Source Code Review", "", "Source Code"},
 	{"ADT", "Active Directory Testing", "Active Directory Testing", "Active Directory Testing", "Active Directory"},
 	{"WNA", "Wireless Network Assessment", "Wireless Network Assessment", "Wireless Network Penetration Testing", "Wireless"},
 	{"NAR", "Network Architecture Review", "Network Architecture Review", "Network Architecture Review", "Network Architecture"},
@@ -100,6 +104,9 @@ var legacyCategoryArea = map[string]string{
 	"ad":           "ADT",
 	"architecture": "NAR",
 	"network":      "NAR",
+	"mobile":       "MPT",
+	"source code":  "SCR",
+	"sourcecode":   "SCR",
 }
 
 // areaCodeOf reads an area code out of a free-form field, accepting both the
@@ -657,9 +664,11 @@ func renderAreaSections(doc string, config ReportConfig, findings []numberedFind
 		area, _ := areaByCode(code)
 		tmpl, ok := templates[code]
 		if !ok {
-			// Areas the template has no block for (API Security Assessment)
-			// borrow the web application block's finding layout under their own
-			// heading, so they still print a real section.
+			// Areas the template has no block for (API Security Assessment,
+			// Mobile Penetration Testing, Source Code Review) borrow the web
+			// application block's finding layout under their own heading, so
+			// they still print a real section. normalizeDetailTemplate then
+			// shapes it into the area's own rows.
 			tmpl = synthesizeAreaTemplate(templates, area)
 			if tmpl.Detail == "" {
 				continue
@@ -731,16 +740,18 @@ func noFindingsParagraph(area areaDef) string {
 // grid columns each spans, but they all follow "label row, then value row", so
 // resolving by label keeps one routine correct for all of them.
 var detailLabels = map[string]string{
-	"description":          "description",
-	"rating":               "rating",
-	"cvss vector":          "cvss",
-	"cvss vector string":   "cvss",
-	"impact":               "impact",
-	"attack vector":        "attackvector",
-	"affected hosts":       "affected",
-	"affected host":        "affected",
-	"affected application": "affected",
-	"affected device":      "affected",
+	"description":           "description",
+	"rating":                "rating",
+	"cvss":                  "cvss",
+	"cvss vector":           "cvss",
+	"cvss vector string":    "cvss",
+	"impact":                "impact",
+	"attack vector":         "attackvector",
+	"affected hosts":        "affected",
+	"affected host":         "affected",
+	"affected application":  "affected",
+	"affected applications": "affected",
+	"affected device":       "affected",
 	// Active Directory findings are reported by endpoint; the row is relabelled
 	// as the section renders, and it has to still be recognised afterwards.
 	"affected endpoint": "affected",
@@ -1014,11 +1025,24 @@ func stripSizeAndFont(cell string) string { return sizeAndFontRe.ReplaceAllStrin
 // section's findings. It runs once per area rather than once per finding.
 func normalizeDetailTemplate(detail, areaCode string, lib detailRowLibrary) string {
 	// Rows this section should not print at all.
-	if areaCode == "ADT" {
+	switch areaCode {
+	case "ADT":
 		// Active Directory findings are reported by endpoint, and the attack
 		// vector row was never filled - it left an empty labelled box.
 		detail = removeDetailRow(detail, "attackvector")
 		detail = relabelDetailRow(detail, "affected", "Affected Endpoint")
+	case "MPT":
+		// Mobile findings borrow the web block, which carries a CVSS row the
+		// mobile layout does not print: Description, Rating, Impact, Affected
+		// Application, PoC, Recommendation.
+		detail = removeDetailRow(detail, "cvss")
+	case "SCR":
+		// Source code findings print Description, Rating, Impact, CVSS, Affected
+		// Applications, PoC, Recommendation - the web block's rows with CVSS
+		// after Impact rather than before it, and both relabelled.
+		detail = moveDetailRowAfter(detail, "cvss", "impact")
+		detail = relabelDetailRow(detail, "cvss", "CVSS")
+		detail = relabelDetailRow(detail, "affected", "Affected Applications")
 	}
 
 	// A finding is one table. Two of them cannot be made to touch - Word always
@@ -1291,6 +1315,35 @@ func removeDetailRow(detail, key string) string {
 			cut := tbl[:rows[ri].Start] + tbl[rows[ri+1].End:]
 			return detail[:t.Start] + cut + detail[t.End:]
 		}
+	}
+	return detail
+}
+
+// moveDetailRowAfter moves a labelled row and its value row to sit directly
+// under the value row of another field in the same table.
+func moveDetailRowAfter(detail, key, afterKey string) string {
+	for _, t := range childElems(detail, "w:tbl") {
+		tbl := detail[t.Start:t.End]
+		label, value, ok := detailRowPair(tbl, key)
+		if !ok || !tableHasLabel(tbl, afterKey) {
+			continue
+		}
+		pair := label + value
+		i := strings.Index(tbl, pair)
+		if i < 0 {
+			return detail
+		}
+		cut := tbl[:i] + tbl[i+len(pair):]
+		_, afterValue, ok := detailRowPair(cut, afterKey)
+		if !ok {
+			return detail
+		}
+		j := strings.Index(cut, afterValue)
+		if j < 0 {
+			return detail
+		}
+		j += len(afterValue)
+		return detail[:t.Start] + cut[:j] + pair + cut[j:] + detail[t.End:]
 	}
 	return detail
 }
@@ -1830,39 +1883,69 @@ func renderScopeTable(doc string, config ReportConfig) string {
 	for _, a := range config.Areas {
 		details[strings.ToUpper(strings.TrimSpace(a.Code))] = strings.TrimSpace(a.Scope)
 	}
-	keep := map[string]areaDef{}
-	for _, code := range selectedAreaCodes(config) {
-		if area, ok := areaByCode(code); ok {
-			keep[strings.ToLower(area.ScopeRow)] = area
-		}
-	}
-
 	tbl := doc[children[tblIdx].Start:children[tblIdx].End]
 	rows := tableRows(tbl)
-	var b strings.Builder
+
+	// The template's activity rows by name. Rows that name no activity are kept
+	// where they were, after the activities.
+	byLabel := map[string]string{}
+	var header, others strings.Builder
 	for ri, r := range rows {
 		row := tbl[r.Start:r.End]
 		cells := rowCells(row)
 		if ri == 0 {
-			b.WriteString(scopeHeaderRow(row))
+			header.WriteString(scopeHeaderRow(row))
 			continue
 		}
 		if len(cells) < 2 {
-			b.WriteString(row)
+			others.WriteString(row)
 			continue
 		}
-		label := strings.ToLower(strings.TrimSpace(elemText(row[cells[0].Start:cells[0].End])))
-		area, ok := keep[label]
+		byLabel[strings.ToLower(strings.TrimSpace(elemText(row[cells[0].Start:cells[0].End])))] = row
+	}
+
+	// An area the template carries no row for (mobile, source code) copies the
+	// row of the nearest area before it in report order. The first rows are an
+	// inch tall and indented; the later ones are not, and a copy of the first
+	// stood out beside its neighbours.
+	protoFor := map[string]string{}
+	last := ""
+	for _, area := range reportAreas {
+		if row, ok := byLabel[strings.ToLower(area.ScopeRow)]; ok {
+			last = row
+			continue
+		}
+		protoFor[area.Code] = last
+	}
+
+	// One row per selected area, in report order, so none is silently missing
+	// from the scope.
+	var b strings.Builder
+	b.WriteString(header.String())
+	for _, code := range selectedAreaCodes(config) {
+		area, ok := areaByCode(code)
 		if !ok {
-			continue // activity not part of this engagement
+			continue
+		}
+		row, ok := byLabel[strings.ToLower(area.ScopeRow)]
+		if !ok {
+			if protoFor[code] == "" {
+				continue
+			}
+			row = protoFor[code]
+			cells := rowCells(row)
+			row = row[:cells[1].Start] + setCellLines(row[cells[1].Start:cells[1].End], []string{""}) + row[cells[1].End:]
+			row = row[:cells[0].Start] + setCellLines(row[cells[0].Start:cells[0].End], []string{area.ScopeRow}) + row[cells[0].End:]
 		}
 		if detail := details[area.Code]; detail != "" {
+			cells := rowCells(row)
 			cell := row[cells[1].Start:cells[1].End]
 			cell, _ = setFirstEmptyParaText(cell, detail)
 			row = row[:cells[1].Start] + cell + row[cells[1].End:]
 		}
 		b.WriteString(row)
 	}
+	b.WriteString(others.String())
 
 	newTbl := tbl[:rows[0].Start] + b.String() + tbl[rows[len(rows)-1].End:]
 	return doc[:children[tblIdx].Start] + newTbl + doc[children[tblIdx].End:]
@@ -1911,6 +1994,64 @@ func renderNamingConvention(doc string, config ReportConfig) string {
 		keep[code] = true
 	}
 
+	// Lines read "WPT – Web Application Penetration Testing".
+	lineOf := func(text string) (areaDef, bool) {
+		for _, area := range reportAreas {
+			if strings.HasPrefix(text, area.Code+" ") && strings.Contains(text, area.Label) {
+				return area, true
+			}
+		}
+		return areaDef{}, false
+	}
+
+	// A selected area the template lists no line for (mobile, source code) gets
+	// one, after the line of the area before it in report order, copied from a
+	// line that uses the en dash the rest of the list does.
+	where := map[string]span{}
+	proto := ""
+	for i := idx + 1; i < end; i++ {
+		c := children[i]
+		if c.Tag != "w:p" {
+			continue
+		}
+		text := strings.TrimSpace(c.Text)
+		area, ok := lineOf(text)
+		if !ok {
+			continue
+		}
+		where[area.Code] = c.span
+		if proto == "" && strings.Contains(text, " – ") {
+			proto = doc[c.Start:c.End]
+		}
+	}
+	if proto != "" {
+		type insert struct {
+			at   int
+			para string
+		}
+		var inserts []insert
+		after := -1
+		for _, area := range reportAreas {
+			if sp, ok := where[area.Code]; ok {
+				after = sp.End
+				continue
+			}
+			if !keep[area.Code] || after < 0 {
+				continue
+			}
+			inserts = append(inserts, insert{after, namingConventionLine(proto, area)})
+		}
+		// Back to front; two inserts at one offset keep their report order.
+		for i := len(inserts) - 1; i >= 0; i-- {
+			doc = doc[:inserts[i].at] + inserts[i].para + doc[inserts[i].at:]
+		}
+		if len(inserts) > 0 {
+			children = bodyChildren(doc)
+			idx = findHeading(children, "Recommendations Naming Convention")
+			end = blockEnd(children, idx, headingLevel(children[idx].Style))
+		}
+	}
+
 	var drop []span
 	for i := idx + 1; i < end; i++ {
 		c := children[i]
@@ -1933,6 +2074,25 @@ func renderNamingConvention(doc string, config ReportConfig) string {
 		doc = deleteRange(doc, drop[i])
 	}
 	return doc
+}
+
+// namingConventionLine writes "MPT – Mobile Penetration Testing" in the shape of
+// an existing line: the code in that line's first run, which is bold, and the
+// rest in its last run, which is not. Written into one run the whole line came
+// out bold.
+func namingConventionLine(proto string, area areaDef) string {
+	var styles []string
+	for _, r := range childElems(proto, "w:r") {
+		if rPr, text, ok := simpleRun(proto[r.Start:r.End]); ok && strings.TrimSpace(text) != "" {
+			styles = append(styles, rPr)
+		}
+	}
+	gt := strings.Index(proto, ">")
+	if len(styles) == 0 || gt < 0 {
+		return setParaText(proto, area.Code+" – "+area.Label)
+	}
+	return proto[:gt+1] + paraPPr(proto) +
+		runsForText(styles[0], area.Code) + runsForText(styles[len(styles)-1], " – "+area.Label) + `</w:p>`
 }
 
 // ---------------------------------------------------------------------------

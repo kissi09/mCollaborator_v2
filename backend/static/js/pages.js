@@ -904,6 +904,10 @@ const AREA_LAYOUTS = {
   // The template ships no API Security Assessment block, so the report prints
   // API findings under the web application layout.
   ASA:  { affected: 'Affected Application', order: ['cvss', 'impact', 'affected', 'poc'], borrowedFrom: 'Web Application Penetration Testing' },
+  // Neither has a block in the template either; the report builds each from the
+  // web application block with its own rows, so neither is "borrowed".
+  MPT:  { affected: 'Affected Application',  order: ['impact', 'affected', 'poc'] },
+  SCR:  { affected: 'Affected Applications', order: ['impact', 'cvss', 'affected', 'poc'], cvss: 'CVSS' },
   ADT:  { affected: 'Affected Domain',      order: ['impact', 'attackVector', 'affected', 'poc'] },
   WNA:  { affected: 'Affected SSIDs',       order: ['impact', 'attackVector', 'affected', 'poc'] },
   NAR:  { affected: 'Affected Network',     order: ['impact', 'affected'] }
@@ -923,7 +927,7 @@ function printedRows(code) {
   const layout = areaLayout(code);
   const names = {
     impact: 'Impact',
-    cvss: 'CVSS Vector',
+    cvss: layout.cvss || 'CVSS Vector',
     attackVector: 'Attack Vector',
     affected: layout.affected,
     poc: layout.pocWhenAttached ? 'PoC (when attached)' : 'PoC'
@@ -1424,6 +1428,8 @@ const REPORT_AREAS = [
   { code: 'WPT',  label: 'Web Application Penetration Testing', hint: 'e.g. https://portal.example.com (2 roles)' },
   { code: 'CFG',  label: 'Configuration Files Review',        hint: 'e.g. 4 firewall + 6 switch configs' },
   { code: 'ASA',  label: 'API Security Assessment',           hint: 'e.g. /api/v1 REST API, 34 endpoints' },
+  { code: 'MPT',  label: 'Mobile Penetration Testing',        hint: 'e.g. Android and iOS banking app v4.2' },
+  { code: 'SCR',  label: 'Source Code Review',                hint: 'e.g. payments-api repository, 120k lines of Java' },
   { code: 'ADT',  label: 'Active Directory Testing',          hint: 'e.g. corp.example.com forest' },
   { code: 'WNA',  label: 'Wireless Network Assessment',       hint: 'e.g. 3 SSIDs across HQ' },
   { code: 'NAR',  label: 'Network Architecture Review',       hint: 'e.g. HQ and DR network topology' }
@@ -1868,7 +1874,8 @@ function afterRenderReportWizardStep() {
 // before areas existed still opens on a sensible area.
 const LEGACY_CATEGORY_AREA = {
   web: 'WPT', webapp: 'WPT', external: 'EPT', internal: 'IPT', cloud: 'IPTC',
-  api: 'ASA', config: 'CFG', wireless: 'WNA', ad: 'ADT', architecture: 'NAR', network: 'NAR'
+  api: 'ASA', config: 'CFG', wireless: 'WNA', ad: 'ADT', architecture: 'NAR', network: 'NAR',
+  mobile: 'MPT', 'source code': 'SCR', sourcecode: 'SCR'
 };
 
 // normalizeAreaCode accepts either an area code as the finding editor now stores

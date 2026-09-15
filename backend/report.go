@@ -84,7 +84,7 @@ type ReportFinding struct {
 	VulnID         string `json:"vuln_id"`  // REC1_WPT1 etc. (auto-generated if empty)
 
 	// Area is the assessment area this finding is reported under (IPT, EPT,
-	// IPTC, WPT, CFG, ASA, ADT, WNA, NAR). It decides which chapter 3 section
+	// IPTC, WPT, CFG, ASA, MPT, SCR, ADT, WNA, NAR). It decides which chapter 3 section
 	// the finding prints in and which bar of the findings-by-area chart it
 	// counts towards. Falls back to Category for engagements predating areas.
 	Area string `json:"area"`
