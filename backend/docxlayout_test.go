@@ -375,24 +375,101 @@ func TestNoBlankParagraphsInsideAFinding(t *testing.T) {
 }
 
 // An empty heading anywhere in chapter 3 shows up as a blank line in the
-// reader's navigation pane.
+// reader's navigation pane. So does an empty paragraph with no heading style
+// but an outline level of its own, which is how the network architecture block
+// wrote the spacer under every finding.
 func TestNoEmptyHeadingsInTheFindings(t *testing.T) {
-	doc := readDocxParts(t, rowsConfig())["word/document.xml"]
+	doc := readDocxParts(t, narSpacingConfig())["word/document.xml"]
 	children := bodyChildren(doc)
 
 	inChapter := false
 	for _, c := range children {
-		text := strings.TrimSpace(elemText(doc[c.Start:c.End]))
-		if c.Tag == "w:p" && isHeading(c.Style) {
-			if text == "Internal Penetration Testing" {
+		el := doc[c.Start:c.End]
+		text := strings.TrimSpace(elemText(el))
+		if c.Tag != "w:p" {
+			continue
+		}
+		if isHeading(c.Style) {
+			if text == "Configuration Files Review" {
 				inChapter = true
 			}
 			if strings.HasPrefix(text, "Tools and Licenses") {
 				break
 			}
-			if inChapter && text == "" {
-				t.Errorf("an empty %s paragraph is in chapter 3; it prints as a blank line in the navigation pane", c.Style)
+		}
+		if !inChapter || text != "" {
+			continue
+		}
+		if isHeading(c.Style) {
+			t.Errorf("an empty %s paragraph is in chapter 3; it prints as a blank line in the navigation pane", c.Style)
+		}
+		if outlineLvlRe.MatchString(el) {
+			t.Errorf("an empty paragraph with an outline level is in chapter 3; it prints as a blank line in the navigation pane")
+		}
+	}
+}
+
+// narSpacingConfig has several findings in both review sections, which is what
+// it takes to see the gap between one finding and the next.
+func narSpacingConfig() ReportConfig {
+	config := sampleConfig()
+	config.Areas = []ReportArea{{Code: "CFG"}, {Code: "NAR"}}
+	config.Findings = nil
+	for _, f := range []struct{ title, area string }{
+		{"Telnet enabled", "CFG"}, {"FTP enabled", "CFG"}, {"No login banner", "CFG"},
+		{"Flat network", "NAR"}, {"No redundancy", "NAR"}, {"No DMZ", "NAR"},
+	} {
+		config.Findings = append(config.Findings, ReportFinding{
+			Title: f.title, Severity: "high", Area: f.area, Description: "d", Impact: "i",
+			AffectedSystem: "core", Recommendation: "Fix it.",
+		})
+	}
+	return config
+}
+
+// The network architecture review lays its findings out exactly as the
+// configuration review does: heading, table, one plain blank line - with no
+// spacing of its own on either, and no blank line before the first finding.
+func TestNetworkArchitectureSpacingMatchesConfigReview(t *testing.T) {
+	doc := readDocxParts(t, narSpacingConfig())["word/document.xml"]
+	children := bodyChildren(doc)
+
+	shape := func(heading, next string) []string {
+		start := findHeading(children, heading)
+		end := findHeading(children, next)
+		if start < 0 || end < 0 {
+			t.Fatalf("section %q not found", heading)
+		}
+		var out []string
+		for _, c := range children[start+1 : end] {
+			el := doc[c.Start:c.End]
+			switch {
+			case strings.Contains(el, "<w:sectPr"):
+				continue
+			case c.Tag == "w:tbl" && tableHasLabel(el, "description"):
+				out = append(out, "finding")
+			case c.Tag == "w:tbl":
+				out = append(out, "checklist")
+			case c.Tag == "w:p" && strings.TrimSpace(elemText(el)) == "":
+				out = append(out, "blank")
+				if pPr := paraPPr(el); pPr != "" {
+					t.Errorf("%s: a blank line between findings carries properties %s", heading, pPr)
+				}
+			case c.Tag == "w:p" && isHeading(c.Style):
+				out = append(out, "heading")
+				if paraSpacingRe.MatchString(paraPPr(el)) {
+					t.Errorf("%s: finding heading %q sets its own spacing", heading, strings.TrimSpace(elemText(el)))
+				}
+			default:
+				out = append(out, "text")
 			}
 		}
+		return out
+	}
+
+	cfg := strings.Join(shape("Configuration Files Review", "Network Architecture Review"), " ")
+	nar := strings.Join(shape("Network Architecture Review", "Tools and Licenses"), " ")
+	if cfg != nar {
+		t.Errorf("the two sections are laid out differently:\n CFG: %s\n NAR: %s", cfg, nar)
 	}
 }

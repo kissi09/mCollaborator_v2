@@ -213,6 +213,7 @@ func renderDocumentBody(doc string, config ReportConfig, findings []numberedFind
 	doc = renderScopeTable(doc, config)
 	doc = renderMethodologySections(doc, config)
 	doc = renderNamingConvention(doc, config)
+	doc = renderEngagementNarrative(doc, config, findings)
 
 	var err error
 	doc, err = renderAreaSections(doc, config, findings, pocs, notes)

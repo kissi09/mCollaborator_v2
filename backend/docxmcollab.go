@@ -26,28 +26,29 @@ var mcollabTemplateDocx []byte
 
 // areaDef ties one assessment area to the four places the template mentions it:
 // the scope table, the naming convention list, its chapter 3 section heading and
-// its bar in the findings-by-area chart.
+// its bar in the findings-by-area chart. The vulnerability register's Exposure
+// column prints the Code itself - the same abbreviation the vulnerability id
+// carries two columns along, rather than a label several areas shared.
 type areaDef struct {
 	Code       string // IPT, EPT, ... - also the vulnerability id infix
 	Label      string // wizard label / naming convention description
 	ScopeRow   string // activity name in the 2.3 Scope table
 	Heading    string // chapter 3 heading, "" when the template has no block
 	ChartLabel string // category label in the findings-by-area chart
-	Exposure   string // vulnerability register "Exposure" column
 }
 
 // reportAreas is in template document order. The chapter 3 region is rebuilt in
 // this order, so a selection always reads the same way round.
 var reportAreas = []areaDef{
-	{"IPT", "Internal Penetration Testing", "Internal Penetration Testing", "Internal Penetration Testing", "Internal", "Internal"},
-	{"EPT", "External Penetration Testing", "External Penetration Testing", "External Penetration Testing", "External", "External"},
-	{"IPTC", "Internal Cloud Penetration Testing", "Internal Cloud Penetration Testing", "Internal Cloud Penetration Testing", "Internal Cloud", "Internal Cloud"},
-	{"WPT", "Web Application Penetration Testing", "Web Application Testing", "Web Application Penetration Testing", "Web Apps", "Web"},
-	{"CFG", "Configuration Files Review", "Configuration Files Review", "Configuration Files Review", "Config Review", "Configuration"},
-	{"ASA", "API Security Assessment", "API Security Assessment", "", "APIs", "API"},
-	{"ADT", "Active Directory Testing", "Active Directory Testing", "Active Directory Testing", "Active Directory", "Internal"},
-	{"WNA", "Wireless Network Assessment", "Wireless Network Assessment", "Wireless Network Penetration Testing", "Wireless", "Wireless"},
-	{"NAR", "Network Architecture Review", "Network Architecture Review", "Network Architecture Review", "Network Architecture", "Internal"},
+	{"IPT", "Internal Penetration Testing", "Internal Penetration Testing", "Internal Penetration Testing", "Internal"},
+	{"EPT", "External Penetration Testing", "External Penetration Testing", "External Penetration Testing", "External"},
+	{"IPTC", "Internal Cloud Penetration Testing", "Internal Cloud Penetration Testing", "Internal Cloud Penetration Testing", "Internal Cloud"},
+	{"WPT", "Web Application Penetration Testing", "Web Application Testing", "Web Application Penetration Testing", "Web Apps"},
+	{"CFG", "Configuration Files Review", "Configuration Files Review", "Configuration Files Review", "Config Review"},
+	{"ASA", "API Security Assessment", "API Security Assessment", "", "APIs"},
+	{"ADT", "Active Directory Testing", "Active Directory Testing", "Active Directory Testing", "Active Directory"},
+	{"WNA", "Wireless Network Assessment", "Wireless Network Assessment", "Wireless Network Penetration Testing", "Wireless"},
+	{"NAR", "Network Architecture Review", "Network Architecture Review", "Network Architecture Review", "Network Architecture"},
 }
 
 // severityHex returns the colour the criticality word itself is printed in.
@@ -229,9 +230,10 @@ func isLetterRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
-// recommendationTitle is the short header printed next to the vulnerability id.
-// The tester can set it explicitly; otherwise the first sentence or line of the
-// recommendation body stands in.
+// recommendationTitle is the short header printed next to the vulnerability id
+// and in the vulnerability register's Recommendation column. The tester can set
+// it explicitly; otherwise it is the recommendation's first sentence, shortened
+// to fit that column in at most two lines.
 func recommendationTitle(f ReportFinding) string {
 	if s := strings.TrimSpace(f.RecommendationHeader); s != "" {
 		return s
@@ -240,10 +242,131 @@ func recommendationTitle(f ReportFinding) string {
 	if body == "" {
 		return strings.TrimSpace(f.Title)
 	}
-	if i := strings.IndexAny(body, ".\n"); i > 0 {
-		body = body[:i]
+	return shortRecommendation(leadSentence(body))
+}
+
+// The register's Recommendation column is 4080 twips wide and holds a little
+// over thirty characters of body text a line; thirty keeps a line of wide
+// capitals from wrapping onto a third.
+const (
+	recTitleLineChars = 30
+	recTitleMaxLines  = 2
+)
+
+var (
+	listMarkerRe = regexp.MustCompile(`^(?:[-*•▪◦–]|\d{1,2}[.)])\s+`)
+	// A full stop ends a sentence only when a space or the end of the text
+	// follows it, so "NX-OS 9.3(10)" and "TLS 1.2" stay whole.
+	sentenceEndRe = regexp.MustCompile(`[.!?](?:\s|$)`)
+)
+
+// sentenceAbbrevs end in a full stop without ending the sentence.
+var sentenceAbbrevs = map[string]bool{"e.g": true, "i.e": true, "etc": true, "vs": true, "incl": true, "approx": true}
+
+// leadSentence is the first sentence of the first non-empty line, without a
+// leading bullet or number and without its closing punctuation.
+func leadSentence(body string) string {
+	line := ""
+	for _, l := range strings.Split(body, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			line = l
+			break
+		}
 	}
-	return truncateText(body, 90)
+	line = strings.TrimSpace(listMarkerRe.ReplaceAllString(line, ""))
+	for _, m := range sentenceEndRe.FindAllStringIndex(line, -1) {
+		words := strings.Fields(line[:m[0]])
+		if len(words) > 0 && sentenceAbbrevs[strings.ToLower(words[len(words)-1])] {
+			continue
+		}
+		line = line[:m[0]]
+		break
+	}
+	return strings.TrimRight(strings.TrimSpace(line), ".:;,")
+}
+
+// shortRecommendation fits a sentence into the register column without an
+// ellipsis. A sentence that is already short enough is kept whole. Otherwise it
+// is cut where the sentence itself pauses - before a comma, a bracket, or a
+// word that starts a qualifying phrase ("for", "using", "across" ...) - taking
+// the longest such cut that fits, so "Implement TACACS+ or RADIUS for
+// centralized device authentication, authorization, and accounting" reads
+// "Implement TACACS+ or RADIUS". Only a sentence with no usable pause is cut
+// between words, and then never on a dangling "and" or "the".
+func shortRecommendation(s string) string {
+	if fitsLines(s, recTitleLineChars, recTitleMaxLines) {
+		return s
+	}
+	words := strings.Fields(s)
+	best := ""
+	for n := 2; n < len(words); n++ {
+		prev, next := words[n-1], strings.ToLower(words[n])
+		pause := strings.HasSuffix(prev, ",") || strings.HasSuffix(prev, ";") ||
+			strings.HasSuffix(prev, ":") || strings.HasPrefix(next, "(") ||
+			next == "–" || next == "—" || next == "-" || recTitlePhraseStarts[next]
+		if !pause {
+			continue
+		}
+		cut := strings.TrimRight(strings.Join(words[:n], " "), ",;:")
+		if !fitsLines(cut, recTitleLineChars, recTitleMaxLines) {
+			break
+		}
+		best = cut
+	}
+	if best != "" {
+		return best
+	}
+	n := len(words)
+	for n > 1 && !fitsLines(strings.Join(words[:n], " "), recTitleLineChars, recTitleMaxLines) {
+		n--
+	}
+	for n > 1 && recTitleDanglers[strings.ToLower(strings.TrimRight(words[n-1], ",;:"))] {
+		n--
+	}
+	return strings.TrimRight(strings.Join(words[:n], " "), ",;:")
+}
+
+// recTitlePhraseStarts open a phrase that qualifies the action before it; the
+// action reads complete without it. "and" and "or" are deliberately absent:
+// cutting there drops half of a pair ("authentication and encryption").
+var recTitlePhraseStarts = map[string]bool{
+	"for": true, "to": true, "using": true, "via": true, "by": true, "with": true,
+	"across": true, "on": true, "in": true, "through": true, "so": true,
+	"which": true, "that": true, "including": true, "where": true, "when": true,
+	"from": true, "within": true, "at": true,
+}
+
+// recTitleDanglers cannot end a phrase.
+var recTitleDanglers = map[string]bool{
+	"a": true, "an": true, "the": true, "and": true, "or": true, "of": true,
+	"for": true, "to": true, "with": true, "on": true, "in": true, "by": true,
+	"using": true, "via": true, "all": true, "any": true, "its": true, "their": true,
+}
+
+// fitsLines reports whether s word-wraps into at most lines lines of width
+// characters.
+func fitsLines(s string, width, lines int) bool {
+	used, col := 1, 0
+	for _, w := range strings.Fields(s) {
+		n := len([]rune(w))
+		switch {
+		case col == 0:
+			col = n
+		case col+1+n <= width:
+			col += 1 + n
+		default:
+			used++
+			col = n
+		}
+		for col > width {
+			used++
+			col -= width
+		}
+		if used > lines {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +669,7 @@ func renderAreaSections(doc string, config ReportConfig, findings []numberedFind
 		// rewritten from this area's findings before the placeholders are filled;
 		// neither pass depends on the other, and doing it here is the one place
 		// that knows which findings belong to which section.
-		prefix := renderTestTypeTables(tmpl.Prefix, byArea[code], notes)
+		prefix := renderTestTypeTables(trimTrailingBlankParagraphs(tmpl.Prefix), byArea[code], notes)
 		b.WriteString(applyScalarPlaceholders(prefix, config))
 
 		list := byArea[code]
@@ -993,8 +1116,11 @@ func styleVulnerabilityHeading(detail string) string {
 }
 
 // setParaStyle gives a paragraph a named style and drops the direct formatting
-// that would otherwise fight it - the numbering the style already applies, and
-// the colour and weight it is meant to supply.
+// that would otherwise fight it - the numbering the style already applies, the
+// colour and weight it is meant to supply, and the 18pt above the heading that
+// the hand-styled blocks add on top of the style's own spacing, which pushed
+// every one of their findings further from the last than the configuration
+// review's are.
 func setParaStyle(para, style string) string {
 	pPr := paraPPr(para)
 	inner := ""
@@ -1004,6 +1130,7 @@ func setParaStyle(para, style string) string {
 		inner = numPrRe.ReplaceAllString(inner, "")
 		inner = outlineLvlRe.ReplaceAllString(inner, "")
 		inner = paraMarkRPrRe.ReplaceAllString(inner, "")
+		inner = paraSpacingRe.ReplaceAllString(inner, "")
 	}
 	newPPr := `<w:pPr><w:pStyle w:val="` + style + `"/>` + inner + `</w:pPr>`
 
@@ -1033,6 +1160,7 @@ var (
 	pStyleElemRe    = regexp.MustCompile(`<w:pStyle[^>]*/>`)
 	numPrRe         = regexp.MustCompile(`(?s)<w:numPr>.*?</w:numPr>`)
 	outlineLvlRe    = regexp.MustCompile(`<w:outlineLvl[^>]*/>`)
+	paraSpacingRe   = regexp.MustCompile(`<w:spacing[^>]*/>`)
 	paraMarkRPrRe   = regexp.MustCompile(`(?s)<w:rPr>.*?</w:rPr>`)
 	runBoldItalicRe = regexp.MustCompile(`<w:(b|bCs|i|iCs)( w:val="[^"]*")?/>`)
 )
@@ -1236,9 +1364,58 @@ func dropEmptyBlockParagraphs(detail string) string {
 			continue // one blank line after the finding, not two
 		}
 		trailingBlank = true
-		b.WriteString(el)
+		b.WriteString(plainSpacer(el))
 	}
 	return b.String()
+}
+
+// plainSpacer strips the paragraph properties off the blank line that closes a
+// finding, so it is the same blank line in every section.
+//
+// The network architecture block writes its spacer as an orange, bold, italic
+// paragraph at outline level 3 with 18pt above it and keep-with-next. No text,
+// so nothing shows on the line itself - but the outline level puts an empty
+// entry under every finding in the navigation pane, and the spacing opens a gap
+// twice the height of the configuration review's between one finding and the
+// next. Only a paragraph with nothing in it is rebuilt: one carrying a page
+// break or a drawing is left exactly as it is.
+func plainSpacer(para string) string {
+	if strings.Contains(para, "<w:br") || strings.Contains(para, "<w:drawing") ||
+		strings.Contains(para, "<w:sectPr") {
+		return para
+	}
+	pPr := paraPPr(para)
+	if pPr == "" {
+		return para
+	}
+	i := strings.Index(para, pPr)
+	return para[:i] + para[i+len(pPr):]
+}
+
+// trimTrailingBlankParagraphs drops the empty paragraphs a section's opening
+// block ends with. The configuration review goes straight from its checklist
+// to its first finding; the network architecture review left a blank line
+// between the two, which printed as a gap nothing else in chapter 3 has.
+func trimTrailingBlankParagraphs(prefix string) string {
+	wrapped := "<w:body>" + prefix + "</w:body>"
+	children := bodyChildren(wrapped)
+	end := len(children)
+	for end > 0 {
+		c := children[end-1]
+		el := wrapped[c.Start:c.End]
+		if c.Tag != "w:p" || strings.TrimSpace(elemText(el)) != "" ||
+			strings.Contains(el, "<w:br") || strings.Contains(el, "<w:drawing") {
+			break
+		}
+		end--
+	}
+	if end == len(children) {
+		return prefix
+	}
+	if end == 0 {
+		return ""
+	}
+	return wrapped[len("<w:body>"):children[end-1].End]
 }
 
 // ---------------------------------------------------------------------------
@@ -1599,7 +1776,7 @@ func renderVulnerabilityRegister(doc string, findings []numberedFinding) string 
 		cells := rowCells(row)
 		values := []string{
 			strings.TrimSpace(f.Title),
-			f.Area.Exposure,
+			f.Area.Code,
 			severityDisplay(f.Severity),
 			f.VulnID,
 			f.RecTitle,
