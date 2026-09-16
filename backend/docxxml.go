@@ -561,6 +561,54 @@ func setParaTextUnbolded(para, text string) string {
 	return b.String()
 }
 
+var (
+	paraJcRe    = regexp.MustCompile(`<w:jc [^>]*/>`)
+	paraOpenRe  = regexp.MustCompile(`^<w:p(?: [^>]*)?>`)
+	paraLeftTag = `<w:jc w:val="left"/>`
+)
+
+// leftAlignParas switches every paragraph in a fragment to left alignment.
+//
+// It is for the columns of the vulnerability register that carry a phrase
+// rather than a code. The template justifies them, and justifying a phrase in a
+// column an inch and a half wide spreads three words across the whole of it -
+// "MongoDB        Unauthenticated" - because every line but the last of a
+// justified paragraph is stretched to the margin. A narrow column has no room
+// to distribute; it only has room to look broken.
+//
+// The element is placed rather than appended: w:jc sits after w:spacing and
+// w:ind and before w:rPr in the schema's sequence, and a paragraph whose
+// properties are out of order is one Word offers to repair.
+func leftAlignParas(frag string) string {
+	paras := childElems(frag, "w:p")
+	for i := len(paras) - 1; i >= 0; i-- {
+		para := frag[paras[i].Start:paras[i].End]
+		frag = frag[:paras[i].Start] + leftAlignPara(para) + frag[paras[i].End:]
+	}
+	return frag
+}
+
+func leftAlignPara(para string) string {
+	if pPr := paraPPr(para); pPr != "" {
+		var replaced string
+		switch {
+		case paraJcRe.MatchString(pPr):
+			replaced = paraJcRe.ReplaceAllString(pPr, paraLeftTag)
+		case strings.Contains(pPr, "<w:rPr>"):
+			i := strings.Index(pPr, "<w:rPr>")
+			replaced = pPr[:i] + paraLeftTag + pPr[i:]
+		default:
+			replaced = strings.TrimSuffix(pPr, "</w:pPr>") + paraLeftTag + "</w:pPr>"
+		}
+		return strings.Replace(para, pPr, replaced, 1)
+	}
+	open := paraOpenRe.FindString(para)
+	if open == "" {
+		return para
+	}
+	return open + `<w:pPr>` + paraLeftTag + `</w:pPr>` + para[len(open):]
+}
+
 // setFirstEmptyParaTextUnbolded is setFirstEmptyParaText with bold switched off
 // on the run it writes.
 func setFirstEmptyParaTextUnbolded(frag, text string) (string, bool) {

@@ -519,3 +519,65 @@ func TestMultiLineCellIsParagraphsNotLineBreaks(t *testing.T) {
 		}
 	}
 }
+
+// TestRegisterPhraseColumnsAreNotJustified. The register's Vulnerability and
+// Recommendation columns are an inch and a half wide and carry a phrase. The
+// template justifies them, and every line of a justified paragraph but the last
+// is stretched to the margin - so a three-word title printed as
+// "MongoDB            Unauthenticated". A narrow column has no room to
+// distribute; the two phrase columns are left aligned instead.
+//
+// The code columns keep the template's own alignment: each holds one short
+// token that never wraps, so nothing there is ever stretched.
+func TestRegisterPhraseColumnsAreNotJustified(t *testing.T) {
+	config := rowsConfig()
+	config.Findings[0].Title = "MongoDB Unauthenticated Uninitialized Heap Memory Leak (MongoBleed)"
+	doc := readDocxParts(t, config)["word/document.xml"]
+
+	children := bodyChildren(doc)
+	idx := findHeading(children, "Vulnerability Register")
+	if idx < 0 {
+		t.Fatal("no Vulnerability Register heading")
+	}
+	tbl := ""
+	for i := idx + 1; i < len(children) && i < idx+6; i++ {
+		if children[i].Tag == "w:tbl" {
+			tbl = doc[children[i].Start:children[i].End]
+			break
+		}
+	}
+	if tbl == "" {
+		t.Fatal("the register has no table")
+	}
+
+	rows := tableRows(tbl)
+	if len(rows) < 2 {
+		t.Fatalf("the register has %d rows", len(rows))
+	}
+	cells := rowCells(tbl[rows[1].Start:rows[1].End])
+	if len(cells) <= registerRecCol {
+		t.Fatalf("the register row has %d cells", len(cells))
+	}
+	body := tbl[rows[1].Start:rows[1].End]
+
+	for _, col := range []int{registerVulnCol, registerRecCol} {
+		cell := body[cells[col].Start:cells[col].End]
+		if !strings.Contains(cell, `<w:jc w:val="left"/>`) {
+			t.Errorf("register column %d is not left aligned: %s", col, elemText(cell))
+		}
+		if strings.Contains(cell, `<w:jc w:val="both"/>`) {
+			t.Errorf("register column %d is still justified", col)
+		}
+		// The paragraph properties still come before the runs, or Word offers
+		// to repair the document.
+		if i, j := strings.Index(cell, "<w:pPr>"), strings.Index(cell, "<w:r>"); i >= 0 && j >= 0 && i > j {
+			t.Errorf("register column %d has its pPr after its first run", col)
+		}
+	}
+
+	// The exposure code column is untouched.
+	code := body[cells[1].Start:cells[1].End]
+	if strings.Contains(code, `<w:jc w:val="left"/>`) {
+		t.Error("the exposure column was realigned; it holds one token and never wraps")
+	}
+}

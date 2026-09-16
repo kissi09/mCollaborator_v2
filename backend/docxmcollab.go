@@ -1798,6 +1798,14 @@ func setPOCCell(cell, text, drawings string) string {
 // vulnerability register
 // ---------------------------------------------------------------------------
 
+// The register's columns, in template order: the vulnerability's name, the
+// exposure code, the criticality badge, the vulnerability id and the short
+// recommendation. The first and last carry a phrase; the rest carry one token.
+const (
+	registerVulnCol = 0
+	registerRecCol  = 4
+)
+
 // renderVulnerabilityRegister repeats the register's single template row once
 // per finding, so the combined view lists exactly the reported vulnerabilities.
 func renderVulnerabilityRegister(doc string, findings []numberedFinding) string {
@@ -1845,6 +1853,18 @@ func renderVulnerabilityRegister(doc string, findings []numberedFinding) string 
 				// Register rows read as body text. The criticality keeps its
 				// bold because it is a coloured badge, not prose.
 				cell, _ = setFirstEmptyParaTextUnbolded(cell, values[ci])
+				// The two columns carrying a phrase are left aligned. The
+				// template justifies them, and a justified phrase in a column
+				// an inch and a half wide comes out as "MongoDB
+				// Unauthenticated" with the gap spanning half the column: every
+				// line of a justified paragraph but the last is stretched to
+				// the margin, and a narrow column has no room to distribute.
+				// The code columns are left exactly as the template has them -
+				// each holds one short token that never wraps, so nothing is
+				// stretched and there is no reason to differ.
+				if ci == registerVulnCol || ci == registerRecCol {
+					cell = leftAlignParas(cell)
+				}
 			}
 			row = row[:cells[ci].Start] + cell + row[cells[ci].End:]
 		}
