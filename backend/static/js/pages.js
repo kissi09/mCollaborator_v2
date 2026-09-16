@@ -2592,7 +2592,7 @@ let bulkImportEngagementId = null;
 
 // importState is the modal's own state. extraction is what the review screen
 // works on and outlives the modal.
-let importState = { tab: 'doc', phase: 'idle', error: '' };
+let importState = { tab: 'doc', phase: 'idle', error: '', area: '' };
 let extraction = null;
 
 const IMPORT_MAX_MB = 25;
@@ -2600,7 +2600,7 @@ const IMPORT_MAX_MB = 25;
 function showBulkImportModal() {
   if (!MCOLLABORATOR.currentEngagement?.id) { showToast('No engagement selected', 'error'); return; }
   bulkImportEngagementId = MCOLLABORATOR.currentEngagement.id;
-  importState = { tab: 'doc', phase: 'idle', error: '' };
+  importState = { tab: 'doc', phase: 'idle', error: '', area: '' };
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -2621,6 +2621,22 @@ function setImportTab(tab) {
   importState.error = '';
   paintImportModal();
 }
+
+// setImportArea records the pick without repainting. Repainting would rebuild
+// the select the click just landed in, which on some browsers closes the list
+// under the pointer before the change has registered anywhere the eye can see.
+function setImportArea(code) {
+  importState.area = code || '';
+  importState.error = '';
+  const err = document.querySelector('#import-modal .import-error');
+  if (err) err.remove();
+}
+
+// SHEET_EXTS are the uploads that need an area picked first: a scan export
+// carries no section headings, so nothing in the file says which assessment it
+// belongs to.
+const SHEET_EXTS = ['.csv', '.xlsx'];
+const IMPORT_EXTS = ['.docx', '.pdf', ...SHEET_EXTS];
 
 function paintImportModal() {
   const host = document.getElementById('import-modal');
@@ -2655,7 +2671,9 @@ function paintImportModal() {
       </div>
       <div class="import-sweep mt-4"><i></i></div>
       <div class="text-xs text-muted mt-4" style="line-height:1.7;">
-        Reading the document structure, finding the vulnerability blocks, then sorting them into assessment areas.
+        ${SHEET_EXTS.some(e => (s.filename || '').toLowerCase().endsWith(e))
+          ? `Reading the rows, joining each host to its port, then merging the rows that repeat one vulnerability.`
+          : `Reading the document structure, finding the vulnerability blocks, then sorting them into assessment areas.`}
       </div>`;
   } else if (s.phase === 'done') {
     const r = extraction || {};
@@ -2694,13 +2712,24 @@ function paintImportModal() {
     body = `
       <div class="dropzone" id="import-dropzone" onclick="document.getElementById('import-file-input').click()">
         <div style="font-size:30px;margin-bottom:8px;">&#8593;</div>
-        <p class="font-display font-bold" style="font-size:16px;">Drop a report here</p>
-        <p class="text-sm text-muted">or click to browse &middot; DOCX or PDF only, up to ${IMPORT_MAX_MB}&nbsp;MB</p>
-        <input type="file" id="import-file-input" accept=".docx,.pdf" style="display:none;" onchange="handleImportFile(this.files)">
+        <p class="font-display font-bold" style="font-size:16px;">Drop a report or a scan export here</p>
+        <p class="text-sm text-muted">or click to browse &middot; DOCX, PDF, CSV or XLSX, up to ${IMPORT_MAX_MB}&nbsp;MB</p>
+        <input type="file" id="import-file-input" accept=".docx,.pdf,.csv,.xlsx" style="display:none;" onchange="handleImportFile(this.files)">
+      </div>
+      <div class="mt-4" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <label class="text-sm" for="import-area" style="white-space:nowrap;">Area for a CSV or XLSX</label>
+        <select id="import-area" class="input" style="flex:1;min-width:230px;"
+          onchange="setImportArea(this.value)">
+          <option value="">&mdash; choose an area &mdash;</option>
+          ${REPORT_AREAS.map(a => `<option value="${a.code}"${s.area === a.code ? ' selected' : ''}>${sanitizeInput(a.label)} (${a.code})</option>`).join('')}
+        </select>
       </div>
       <div class="import-note mt-4">
-        Findings are read out of the document and sorted into assessment areas by their section headings, and by
-        the wording of each finding where a heading does not say.
+        Findings in a <span style="color:var(--text);">report</span> are sorted into assessment areas by their section
+        headings, and by the wording of each finding where a heading does not say.
+        A <span style="color:var(--text);">scan export</span> says nothing about which assessment it came from, so it
+        takes the area picked above &mdash; and rows repeating one vulnerability across hosts are merged into a single
+        finding listing every <span class="font-mono" style="color:var(--text);">host:port</span>.
         <span style="color:var(--text);">Nothing is saved until you have reviewed the sorting.</span>
       </div>`;
   }
@@ -2723,7 +2752,7 @@ function paintImportModal() {
       <span class="text-xs text-muted">${doc
         ? (importState.phase === 'done' && (extraction?.unplaced || 0) > 0
           ? `${extraction.unplaced} finding${extraction.unplaced === 1 ? '' : 's'} could not be placed with confidence`
-          : `DOCX and PDF only`)
+          : `DOCX, PDF, CSV or XLSX`)
         : 'Pasted findings are reviewed the same way'}</span>
       <div class="flex gap-2">
         <button class="btn btn-ghost" onclick="closeImportModal()">Cancel</button>
@@ -2774,8 +2803,17 @@ async function handleImportFile(files) {
 
   const name = file.name || '';
   const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
-  if (ext !== '.docx' && ext !== '.pdf') {
-    importState.error = 'Only .docx and .pdf reports can be read. A .doc has to be saved as .docx first.';
+  if (!IMPORT_EXTS.includes(ext)) {
+    importState.error = 'Only .docx and .pdf reports and .csv or .xlsx scan exports can be read. '
+      + 'A .doc has to be saved as .docx first, and an .xls as .xlsx.';
+    paintImportModal();
+    return;
+  }
+  // Asked here rather than by the server, so the file is not sent and then
+  // rejected: the tester picks the area and drops the same file again.
+  if (SHEET_EXTS.includes(ext) && !importState.area) {
+    importState.error = `Pick the assessment area this ${ext.slice(1).toUpperCase()} came from first `
+      + '— a scan export does not say which assessment it belongs to.';
     paintImportModal();
     return;
   }
@@ -2793,6 +2831,7 @@ async function handleImportFile(files) {
 
   const form = new FormData();
   form.append('file', file);
+  if (SHEET_EXTS.includes(ext)) form.append('area', importState.area);
   try {
     const res = await api.upload(`/engagements/${bulkImportEngagementId}/findings/extract`, form);
     extraction = res.data;
@@ -2893,7 +2932,9 @@ function renderExtractionReview() {
     <div class="import-review" style="margin:-24px;">
       <div id="review-head"></div>
       <div class="review-hint">
-        &#9889; Each finding was placed by its section heading, or by its wording where the heading did not say.
+        &#9889; ${SHEET_EXTS.some(e => (extraction.kind || '') === e.slice(1))
+          ? 'Every row took the area you picked for the sheet, and rows repeating one vulnerability were merged into a single finding.'
+          : 'Each finding was placed by its section heading, or by its wording where the heading did not say.'}
         Drag a card into another column, or set its area on the card &mdash; whichever is quicker.
       </div>
       <div class="review-board"><div class="review-inner" id="review-board"></div></div>
@@ -3070,6 +3111,7 @@ async function commitExtraction() {
     description: c.description,
     impact: c.impact,
     severity: c.severity || 'info',
+    cve: c.cve || '',
     cvss_vector: c.cvss_vector || '',
     cvss_score: Number(c.cvss_score) || 0,
     affected_system: c.affected_system || '',

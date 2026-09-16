@@ -38,6 +38,12 @@ const (
 	ConfKeywords ExtractConfidence = "keywords"
 	// ConfNone: neither. The candidate comes back with no area.
 	ConfNone ExtractConfidence = "none"
+	// ConfChosen: nothing in the file said, and nothing had to - the tester
+	// chose the area for the whole upload. A scanner's export carries no
+	// section headings and its rows are too terse to read an area out of, so
+	// this is what the spreadsheet path returns. It is a decision, not a guess,
+	// and the review board marks it settled rather than as one to check.
+	ConfChosen ExtractConfidence = "chosen"
 )
 
 // ExtractedFinding is one candidate. The field names match createFindingInput so
@@ -47,6 +53,7 @@ type ExtractedFinding struct {
 	Description    string  `json:"description"`
 	Impact         string  `json:"impact"`
 	Severity       string  `json:"severity"`
+	CVE            string  `json:"cve,omitempty"`
 	CVSSVector     string  `json:"cvss_vector,omitempty"`
 	CVSSScore      float64 `json:"cvss_score,omitempty"`
 	AffectedSystem string  `json:"affected_system,omitempty"`

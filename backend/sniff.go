@@ -33,7 +33,11 @@ func sniffDocument(data []byte, ext string) error {
 			"reached the server, so there was nothing to import. This is a fault in the upload, " +
 			"not in your document")
 	}
-	if len(data) < 64 {
+	// A .docx, an .xlsx or a PDF carries tens of bytes of container before any
+	// content, so anything this small is a transport fault. A CSV does not: a
+	// header row and one finding is a legitimate, tiny file, and the empty
+	// check above is the only size worth refusing it at.
+	if len(data) < 64 && ext != ".csv" {
 		return fmt.Errorf("the upload arrived as only %d bytes, far too small to be a report - "+
 			"the file content did not survive the upload. This is a fault in the upload, not in "+
 			"your document", len(data))
@@ -47,10 +51,21 @@ func sniffDocument(data []byte, ext string) error {
 	// Named as one thing, actually another. These are worth calling out by
 	// name because each has a different fix.
 	switch {
+	case bytes.HasPrefix(data, oleHeader) && (ext == ".xlsx" || ext == ".csv"):
+		return fmt.Errorf("this is a legacy Excel .xls saved under a %s name. Excel opens it, but it "+
+			"is not an .xlsx and cannot be read as one. Open it in Excel and use File > Save As > "+
+			"Excel Workbook (.xlsx) or CSV, then import that (received %d bytes)", ext, len(data))
 	case bytes.HasPrefix(data, oleHeader):
 		return fmt.Errorf("this is a legacy Word .doc saved under a .docx name. Word opens it, but "+
 			"it is not a .docx and cannot be read as one. Open it in Word and use File > Save As > "+
 			"Word Document (.docx), then import that (received %d bytes)", len(data))
+	case bytes.HasPrefix(data, zipHeader) && ext == ".csv":
+		return fmt.Errorf("this is a workbook or a zip saved under a .csv name. A .csv is plain text. " +
+			"Either rename it to .xlsx and import it as a workbook, or open it in Excel and use " +
+			"File > Save As > CSV")
+	case bytes.HasPrefix(data, pdfHeader) && (ext == ".csv" || ext == ".xlsx"):
+		return fmt.Errorf("this is a PDF under a %s name. Rename it to .pdf and import it as a "+
+			"report instead", ext)
 	case bytes.HasPrefix(data, []byte(`{\rtf`)):
 		return fmt.Errorf("this is an RTF file under a %s name. Open it in Word and save it as a "+
 			"Word Document (.docx) or a PDF, then import that", ext)
@@ -74,6 +89,21 @@ func sniffDocument(data []byte, ext string) error {
 			}
 			return fmt.Errorf("this is not a PDF: it must start with %q, but this file starts with "+
 				"%s (%d bytes received)", "%PDF-", describeHead(data), len(data))
+		}
+	case ".xlsx":
+		if !bytes.HasPrefix(data, zipHeader) {
+			return fmt.Errorf("this is not an .xlsx: a workbook is a zip container and must start "+
+				"with %q, but this file starts with %s (%d bytes received)",
+				"PK", describeHead(data), len(data))
+		}
+	case ".csv":
+		// A CSV is whatever text the exporter wrote, so there is no signature
+		// to check. What can be checked is that it is text at all: a binary
+		// under a .csv name reads as a table of control characters rather than
+		// failing, and the tester sees a page of nonsense instead of a reason.
+		if i := bytes.IndexByte(data[:min(len(data), 4096)], 0); i >= 0 {
+			return fmt.Errorf("this is not a CSV: it is a binary file (a zero byte at offset %d), "+
+				"and a CSV is plain text. It starts with %s", i, describeHead(data))
 		}
 	}
 	return nil

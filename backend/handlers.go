@@ -495,10 +495,26 @@ func HandleExtractFindings(store *Store) http.HandlerFunc {
 
 		name := filepath.Base(header.Filename)
 		ext := strings.ToLower(filepath.Ext(name))
-		if ext != ".docx" && ext != ".pdf" {
+		isSheet := ext == ".csv" || ext == ".xlsx"
+		if ext != ".docx" && ext != ".pdf" && !isSheet {
 			writeJSON(w, http.StatusBadRequest, ApiResponse{
-				Error: &ApiError{Code: "UNSUPPORTED_TYPE", Message: "Only .docx and .pdf reports can be read. A .doc has to be saved as .docx first."}})
+				Error: &ApiError{Code: "UNSUPPORTED_TYPE", Message: "Only .docx and .pdf reports and .csv or .xlsx scanner exports can be read. A .doc has to be saved as .docx first."}})
 			return
+		}
+
+		// A spreadsheet says nothing about which assessment it came from - a
+		// scanner export has no section headings and its rows are too terse to
+		// read an area out of - so the tester picks one for the file and every
+		// row takes it. Refusing here rather than filing the rows under a guess
+		// is the same rule the document passes follow when two areas tie.
+		area := strings.ToUpper(strings.TrimSpace(r.FormValue("area")))
+		if isSheet {
+			if _, ok := areaByCode(area); !ok {
+				writeJSON(w, http.StatusBadRequest, ApiResponse{Error: &ApiError{
+					Code:    "AREA_REQUIRED",
+					Message: "Choose the assessment area this spreadsheet came from - a scanner export does not say which assessment it belongs to."}})
+				return
+			}
 		}
 
 		data, err := io.ReadAll(io.LimitReader(file, extractMaxBytes+1))
@@ -539,6 +555,13 @@ func HandleExtractFindings(store *Store) http.HandlerFunc {
 			text, err = pdfPlainText(trimPDFPreamble(data))
 			if err == nil {
 				findings, notes = ExtractFromPDFText(text)
+			}
+		case ".csv", ".xlsx":
+			kind = strings.TrimPrefix(ext, ".")
+			var rows [][]string
+			rows, err = readSheetRows(data, ext)
+			if err == nil {
+				findings, notes, err = ExtractFromSheet(rows, area)
 			}
 		}
 		if err != nil {

@@ -300,16 +300,19 @@ func TestZenithClosureDeck(t *testing.T) {
 		t.Errorf("got %d headline slides, want %d", len(summaries), want)
 	}
 	all := strings.Join(summaries, " || ")
+	// The callouts around the ring are labelled with the area code, not the
+	// area's full name: the name is on the scope slide, which has a column for
+	// it, where a callout has three inches and an arrow pointing at it.
 	for _, p := range panels {
-		if !strings.Contains(all, p.Heading) {
-			t.Errorf("no headline panel is headed %q", p.Heading)
+		if !strings.Contains(all, p.Code) {
+			t.Errorf("no headline callout is labelled %q", p.Code)
 		}
 		for i, title := range p.Headlines {
 			if i >= headlinesPerPanel {
 				break
 			}
-			if !strings.Contains(all, title) {
-				t.Errorf("%s headline %q is missing", p.Heading, title)
+			if !strings.Contains(all, shortHeadline(title)) {
+				t.Errorf("%s headline %q is missing", p.Code, title)
 			}
 		}
 	}

@@ -11,6 +11,7 @@ package main
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -256,9 +257,21 @@ func TestOneAreaSpreadsAroundTheRing(t *testing.T) {
 	}
 
 	spread := spreadPanels(panels, 4)
-	if len(spread) < 2 {
-		t.Fatalf("%d findings in one area filled %d panel(s); the spare slots were left empty",
-			len(config.Findings), len(spread))
+	// Every slot the ring draws an arrow to is used, as long as there is a
+	// finding for it: spreading two findings at a time left the last callout
+	// empty for any engagement with fewer than seven findings.
+	if want := min(len(config.Findings), 4); len(spread) != want {
+		t.Fatalf("%d findings in one area filled %d of the ring's 4 callouts, want %d",
+			len(config.Findings), len(spread), want)
+	}
+	// And they are shared out evenly rather than piled into the first callouts:
+	// no callout carries more than one finding more than any other.
+	lo, hi := len(spread[0].Headlines), len(spread[0].Headlines)
+	for _, p := range spread {
+		lo, hi = min(lo, len(p.Headlines)), max(hi, len(p.Headlines))
+	}
+	if hi-lo > 1 {
+		t.Errorf("the callouts hold between %d and %d findings; they are not spread evenly", lo, hi)
 	}
 	if spread[0].Heading != panels[0].Heading {
 		t.Errorf("the first panel lost its heading: %q", spread[0].Heading)
@@ -286,6 +299,110 @@ func TestOneAreaSpreadsAroundTheRing(t *testing.T) {
 	got := spreadPanels(four, 4)
 	if len(got) != 4 || got[0].Heading != "A" || got[1].Heading != "B" {
 		t.Errorf("four areas were rearranged: %+v", got)
+	}
+}
+
+// TestRingCalloutsShareOutEvenly pins how the ring's four callouts are divided
+// between the areas in scope. The old rule handed out two findings at a time,
+// so four findings in one area filled two callouts and left two empty, and two
+// areas of three findings filled three and left one - the slots ran out before
+// the ring was surrounded.
+func TestRingCalloutsShareOutEvenly(t *testing.T) {
+	titles := func(n int) []string {
+		var out []string
+		for i := range n {
+			out = append(out, fmt.Sprintf("finding %d", i+1))
+		}
+		return out
+	}
+	cases := []struct {
+		name  string
+		areas []int // findings per area, in template order
+		want  []int // findings per callout, in reading order
+	}{
+		{"seven in one area", []int{7}, []int{2, 2, 2, 1}},
+		{"four in one area", []int{4}, []int{1, 1, 1, 1}},
+		{"three in one area", []int{3}, []int{1, 1, 1}},
+		{"two in one area", []int{2}, []int{1, 1}},
+		{"one in one area", []int{1}, []int{1}},
+		{"three and four", []int{3, 4}, []int{2, 1, 2, 2}},
+		{"one each", []int{1, 1}, []int{1, 1}},
+		{"an area with nothing to report", []int{3, 0}, []int{1, 1, 1, 0}},
+		{"four areas are left alone", []int{5, 1, 1, 1}, []int{5, 1, 1, 1}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var panels []areaPanel
+			for i, n := range tc.areas {
+				panels = append(panels, areaPanel{
+					Heading: fmt.Sprintf("Area %d", i+1),
+					Code:    fmt.Sprintf("A%d", i+1),
+					// Beyond the first slot the list is the same area continued,
+					// so the label is printed once.
+					Headlines: titles(n),
+				})
+			}
+			got := spreadPanels(panels, 4)
+			var sizes []int
+			for _, p := range got {
+				sizes = append(sizes, len(p.Headlines))
+			}
+			if !reflect.DeepEqual(sizes, tc.want) {
+				t.Errorf("callouts hold %v findings, want %v", sizes, tc.want)
+			}
+			// Every callout an area reached carries that area's code: a callout
+			// with no label over it belongs to whichever area the reader
+			// guesses, and with two areas sharing four callouts the unlabelled
+			// ones land between them.
+			seen := map[string]int{}
+			for i, p := range got {
+				if p.Code == "" {
+					t.Errorf("callout %d holds %d findings under no label at all", i, len(p.Headlines))
+					continue
+				}
+				seen[p.Code]++
+			}
+			for i, n := range tc.areas {
+				if code := fmt.Sprintf("A%d", i+1); n > 0 && seen[code] == 0 {
+					t.Errorf("%s reached no callout of its own", code)
+				}
+			}
+		})
+	}
+}
+
+// TestEmptyCalloutLosesItsArrow is the regression for the arrow the template
+// draws from the ring out to a callout the engagement had nothing to put in:
+// with the callout blanked, the arrow was left jabbing at an empty corner.
+func TestEmptyCalloutLosesItsArrow(t *testing.T) {
+	deck, err := openClosureTemplate()
+	if err != nil {
+		t.Fatalf("openClosureTemplate: %v", err)
+	}
+	tmpl := deck.part(summaryTemplatePart)
+	if tmpl == nil {
+		t.Fatal("the closure template has no headline slide")
+	}
+	blank := string(tmpl.Data)
+	if got := len(arrowShapes(blank)); got != len(findingShapes(blank)) {
+		t.Fatalf("the template draws %d arrows for %d callouts", got, len(findingShapes(blank)))
+	}
+
+	// Two findings in one area reach two of the ring's four callouts, so two
+	// arrows have nothing to point at.
+	filled := renderSummarySlide(blank, []areaPanel{{
+		Heading:   "Network Architecture Review",
+		Code:      "NAR",
+		Headlines: []string{"Flat core network", "Unrestricted inter-VLAN routing"},
+	}})
+	if got := len(arrowShapes(filled)); got != 2 {
+		t.Errorf("%d arrows survived two filled callouts, want 2", got)
+	}
+	if strings.Contains(filled, "[Finding]") {
+		t.Error("a [Finding] placeholder is still printing on the headline slide")
+	}
+	if !strings.Contains(filled, "NAR") {
+		t.Error("the callout is not labelled with its area code")
 	}
 }
 

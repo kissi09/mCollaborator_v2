@@ -29,17 +29,37 @@ const (
 	summaryTemplatePart = "ppt/slides/slide3.xml"
 	scopeSlidePart      = "ppt/slides/slide2.xml"
 
-	// headlinesPerPanel is how many findings one of slide 3's panels holds: the
-	// template gives each of them two [Finding] lines.
-	headlinesPerPanel = 2
+	// headlinesPerPanel is the most findings one of slide 3's panels shows.
+	// The template gives each panel two [Finding] lines, but the panels are
+	// rebuilt paragraph by paragraph and shrunk to fit, so the limit is what
+	// stays readable at the back of a room rather than what the template drew:
+	// three lines under a heading. Past that the type has to drop below the
+	// severity legend beside it.
+	headlinesPerPanel = 3
+
+	// headlineChars is how long a finding's title prints in a panel before it
+	// is cut back to a whole word. The panels are about thirty characters wide
+	// at the size the template sets, so this is two lines of title; a title
+	// that runs to four turns its slot into a paragraph and squeezes the
+	// findings under it. The full title is on that finding's own issues row,
+	// which is where it is read from.
+	headlineChars = 60
 
 	// summaryPanelsPerSlide is how many areas one headline slide shows.
 	summaryPanelsPerSlide = 4
 )
 
 // areaPanel is one assessment area as the executive summary presents it.
+//
+// Two names, because the two slides have room for different ones. The scope
+// table on slide 2 is a table with a column to itself and names the activity in
+// full; the callouts around the ring on slide 3 are three-inch boxes with an
+// arrow pointing at them, and there the area is flagged by its code - the same
+// abbreviation the issues slides are titled with and the vulnerability ids
+// carry, so a heading costs one short line instead of three.
 type areaPanel struct {
 	Heading   string   // the area's own name, e.g. "Web Application Penetration Testing"
+	Code      string   // the area's abbreviation, e.g. "WPT" - the ring callout's label
 	ScopeText []string // what was tested, one line per target
 	Headlines []string // the area's findings, most severe first
 }
@@ -75,6 +95,7 @@ func buildAreaPanels(config ReportConfig, findings []numberedFinding) []areaPane
 		}
 		panels = append(panels, areaPanel{
 			Heading:   area.Label,
+			Code:      area.Code,
 			ScopeText: splitScopeLines(scopeOf[code]),
 			Headlines: titles,
 		})
@@ -338,43 +359,134 @@ func plural(n int, one, many string) string {
 // slide 3 - headline findings
 // ---------------------------------------------------------------------------
 
-// spreadPanels fills the panel slots a slide would otherwise leave empty by
-// splitting an area's findings across them.
+// spreadPanels shares the ring's callouts out over the engagement's findings so
+// that every slot the slide draws an arrow to has something in it.
 //
-// The ring has four panels around it, one per area. An engagement scoped to a
-// single area filled one of them and left three blank, so every finding piled
-// into one corner and the ring sat against three-quarters of nothing. Rather
-// than leave the slots empty, an area with more findings than one panel shows
-// is continued into the next slot, heading printed once so the continuation
-// reads as more of the same list and not as a second area.
+// The ring has four callouts around it, one per area in the template's own
+// engagement. Two things went wrong with a real one. An engagement scoped to a
+// single area filled one callout and left three blank, so every finding piled
+// into one corner and the ring sat against three-quarters of nothing. And when
+// a slot was spread into, it was spread into two findings at a time, so seven
+// findings filled three callouts and left the fourth empty while four findings
+// filled two and left two empty - the slots ran out before the ring was
+// surrounded.
+//
+// So the slots are shared out first and filled afterwards. Every area takes one
+// to begin with, each spare slot goes to whichever area's callouts are fullest,
+// and an area's findings are then divided as evenly as its share allows. Seven
+// findings in one area come out 2/2/2/1 around the ring and four come out
+// 1/1/1/1, rather than piling up at the front. Each callout is flagged with the
+// area's code, so a reader can tell which arrow's findings are whose without
+// tracing back to the last one that carried a label.
 //
 // Nothing changes when the engagement fills the slots on its own: with four or
 // more areas there is no spare slot to spread into.
 func spreadPanels(panels []areaPanel, slots int) []areaPanel {
-	out := append([]areaPanel(nil), panels...)
-	for len(out) < slots {
-		// The panel with the most findings still unshown is the one worth
-		// continuing; when none has any, the slide is as full as it gets.
+	if slots <= 0 || len(panels) >= slots {
+		return panels
+	}
+
+	// share is how many callouts each area ends up with. Every area keeps one
+	// whatever it found - an area with nothing to report still says so.
+	share := make([]int, len(panels))
+	for i := range share {
+		share[i] = 1
+	}
+	for spare := slots - len(panels); spare > 0; spare-- {
+		// The area worth another slot is the one whose callouts are currently
+		// the fullest; splitting it evens the slide out the most. An area
+		// already down to one finding a callout has nothing left to split, and
+		// when none of them has, the ring is as surrounded as it gets.
 		best := -1
-		for i := range out {
-			if len(out[i].Headlines) <= headlinesPerPanel {
+		for i := range panels {
+			if perPanel(panels[i], share[i]) <= 1 {
 				continue
 			}
-			if best < 0 || len(out[i].Headlines) > len(out[best].Headlines) {
+			if best < 0 ||
+				perPanel(panels[i], share[i]) > perPanel(panels[best], share[best]) {
 				best = i
 			}
 		}
 		if best < 0 {
 			break
 		}
-		rest := out[best].Headlines[headlinesPerPanel:]
-		out[best].Headlines = out[best].Headlines[:headlinesPerPanel]
-		cont := areaPanel{Headlines: rest}
-		out = append(out, areaPanel{})
-		copy(out[best+2:], out[best+1:])
-		out[best+1] = cont
+		share[best]++
+	}
+
+	var out []areaPanel
+	for i, panel := range panels {
+		for slot, headlines := range splitEvenly(panel.Headlines, share[i]) {
+			if slot == 0 {
+				panel.Headlines = headlines
+				out = append(out, panel)
+				continue
+			}
+			// The code is repeated over the rest of an area's list, and only
+			// the code: the arrow beside it points at the ring, so a callout
+			// with nothing over it belongs to whichever area the reader guesses
+			// - and with two areas sharing four callouts the unlabelled one
+			// landed between them, nearer the area it was not part of. Three
+			// letters cost a line the panel has; ambiguity costs the slide.
+			out = append(out, areaPanel{Code: panel.Code, Headlines: headlines})
+		}
 	}
 	return out
+}
+
+// panelIsEmpty reports whether a callout has anything to say. An area that was
+// tested and found nothing is not empty - its heading says so - and neither is
+// the continuation of a list, which carries findings without a heading of its
+// own. A slot no area reached is.
+func panelIsEmpty(p areaPanel) bool {
+	return p.Heading == "" && len(p.Headlines) == 0
+}
+
+// perPanel is how many findings each of an area's callouts would carry if it
+// held the given number of them.
+func perPanel(panel areaPanel, share int) int {
+	if share <= 0 {
+		return len(panel.Headlines)
+	}
+	return (len(panel.Headlines) + share - 1) / share
+}
+
+// splitEvenly divides a list into n groups of as near the same size as the list
+// allows, the remainder going to the groups at the front so the first callout
+// is never the thinnest. An empty list still yields one empty group: the area
+// was tested and its callout says so.
+func splitEvenly(items []string, n int) [][]string {
+	if n < 1 {
+		n = 1
+	}
+	if len(items) < n {
+		n = max(len(items), 1)
+	}
+	out := make([][]string, 0, n)
+	at := 0
+	for i := range n {
+		size := len(items) / n
+		if i < len(items)%n {
+			size++
+		}
+		out = append(out, items[at:at+size])
+		at += size
+	}
+	return out
+}
+
+// shortHeadline cuts a finding's title back to something a callout can carry,
+// at a word boundary and with an ellipsis so the cut is visible rather than
+// looking like a title that happens to end mid-phrase.
+func shortHeadline(title string) string {
+	title = strings.TrimSpace(title)
+	if len([]rune(title)) <= headlineChars {
+		return title
+	}
+	cut := string([]rune(title)[:headlineChars])
+	if i := strings.LastIndexAny(cut, " \t"); i > headlineChars/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " \t,;:-") + "…"
 }
 
 // renderSummarySlide fills one headline slide with up to four areas.
@@ -382,24 +494,64 @@ func renderSummarySlide(slide string, panels []areaPanel) string {
 	shapes := findingShapes(slide)
 	panels = spreadPanels(panels, len(shapes))
 
-	// Rewrite from the last shape in the file backwards, so each edit only
-	// moves text the loop has already passed. Which panel a shape gets comes
-	// from its reading position, which is not its position in the file.
-	for i := len(shapes) - 1; i >= 0; i-- {
+	// Every edit is worked out against the slide as it stands and applied from
+	// the end of the file backwards, so each one only moves text the loop has
+	// already passed. Which panel a shape gets comes from its reading position,
+	// which is not its position in the file.
+	var edits []slideEdit
+	for _, shape := range shapes {
 		panel := areaPanel{}
-		if shapes[i].reading < len(panels) {
-			panel = panels[shapes[i].reading]
+		if shape.reading < len(panels) {
+			panel = panels[shape.reading]
 		}
-		headlines := panel.Headlines
-		if len(headlines) > headlinesPerPanel {
-			headlines = headlines[:headlinesPerPanel]
+		var headlines []string
+		for _, title := range panel.Headlines {
+			if len(headlines) == headlinesPerPanel {
+				break
+			}
+			headlines = append(headlines, shortHeadline(title))
 		}
-		sp := shapes[i].at
-		slide = slide[:sp.Start] +
-			setShapeParagraphs(slide[sp.Start:sp.End], panel.Heading, headlines) +
-			slide[sp.End:]
+		edits = append(edits, slideEdit{shape.at, setShapeParagraphs(
+			slide[shape.at.Start:shape.at.End], panel.Code, headlines)})
+	}
+	edits = append(edits, dropUnusedArrows(slide, shapes, panels)...)
+
+	sort.Slice(edits, func(i, j int) bool { return edits[i].at.Start > edits[j].at.Start })
+	for _, e := range edits {
+		slide = slide[:e.at.Start] + e.with + slide[e.at.End:]
 	}
 	return slide
+}
+
+// slideEdit is a rewritten - or, with an empty body, deleted - shape.
+type slideEdit struct {
+	at   span
+	with string
+}
+
+// dropUnusedArrows removes the arrow pointing at a callout nothing filled.
+//
+// The template draws an arrow from the ring out to each of its four callouts.
+// An engagement with fewer findings than callouts leaves one of them blank, and
+// the arrow stays: a marker jabbing at an empty corner of the slide, which
+// reads as text that failed to render rather than as a slide with less to say.
+// The arrows are matched to the callouts by the same reading order the callouts
+// are filled in, and only when the template still has one arrow per callout -
+// a template that has gained or lost one is one to look at rather than to guess
+// about.
+func dropUnusedArrows(slide string, shapes []panelShape, panels []areaPanel) []slideEdit {
+	arrows := arrowShapes(slide)
+	if len(arrows) != len(shapes) {
+		return nil
+	}
+	var out []slideEdit
+	for _, arrow := range arrows {
+		if arrow.reading < len(panels) && !panelIsEmpty(panels[arrow.reading]) {
+			continue
+		}
+		out = append(out, slideEdit{arrow.at, ""})
+	}
+	return out
 }
 
 var aOffRe = regexp.MustCompile(`<a:off x="(-?\d+)" y="(-?\d+)"/>`)
@@ -430,6 +582,24 @@ type panelShape struct {
 // and, with a single area spread over two panels, printed the continuation of a
 // list above the heading it continued.
 func findingShapes(slide string) []panelShape {
+	return shapesInReadingOrder(slide, func(frag string) bool {
+		return strings.Contains(frag, "[Finding]")
+	})
+}
+
+// arrowShapes locates the markers the template draws from the ring out to each
+// callout, in the same reading order the callouts themselves are in, so an
+// arrow can be matched to the panel it points at without measuring where it
+// points. They are the slide's only triangles.
+func arrowShapes(slide string) []panelShape {
+	return shapesInReadingOrder(slide, func(frag string) bool {
+		return strings.Contains(frag, `prst="triangle"`)
+	})
+}
+
+// shapesInReadingOrder returns the shapes a test accepts, in file order, each
+// tagged with its reading position.
+func shapesInReadingOrder(slide string, want func(frag string) bool) []panelShape {
 	type placed struct {
 		at   span
 		x, y int
@@ -437,7 +607,7 @@ func findingShapes(slide string) []panelShape {
 	var found []placed
 	for _, s := range childElems(slide, "p:sp") {
 		frag := slide[s.Start:s.End]
-		if !strings.Contains(frag, "[Finding]") {
+		if !want(frag) {
 			continue
 		}
 		p := placed{at: s}
@@ -599,8 +769,12 @@ func estimateHeight(heading string, lines []string, sizeHundredths float64, widt
 	if pt <= 0 {
 		return 0
 	}
-	// A character averages about half its point size in width.
-	perLine := float64(widthEMU) / emuPerPoint / (pt * 0.5)
+	// A character averages about five eighths of its point size in width in the
+	// deck's own face. Half was the textbook figure and it was too generous:
+	// measured against a rendered slide, a 253pt callout takes 22 characters of
+	// 18pt Wavehaus to the line, not 28 - so a callout the estimate called a
+	// comfortable fit ran a line and a half below its box.
+	perLine := float64(widthEMU) / emuPerPoint / (pt * 0.62)
 	if perLine < 1 {
 		perLine = 1
 	}
