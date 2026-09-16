@@ -473,3 +473,49 @@ func TestNetworkArchitectureSpacingMatchesConfigReview(t *testing.T) {
 		t.Errorf("the two sections are laid out differently:\n CFG: %s\n NAR: %s", cfg, nar)
 	}
 }
+
+// TestMultiLineCellIsParagraphsNotLineBreaks is the regression for a finding
+// description that printed with its words stretched across the cell.
+//
+// The template's Normal style is justified, and Word justifies every line of a
+// justified paragraph except the last. A scanner's description arrives
+// hard-wrapped at about eighty columns; written as one paragraph with a line
+// break at each wrap, every one of those lines was a line that is "not last",
+// so Word spread each of them over the full width of the cell. A real MongoDB
+// description came through as one paragraph of 26,327 characters with 350 line
+// breaks in it, reading "memory        leak        vulnerability:".
+func TestMultiLineCellIsParagraphsNotLineBreaks(t *testing.T) {
+	config := rowsConfig()
+	desc := "The instance of MongoDB running on the remote host is affected by MongoBleed, an\n" +
+		"unauthenticated unintialized heap memory leak vulnerability:\n" +
+		"\n" +
+		"0x00:  33 44 38 33 42 35 31 65    3D83B51e\n" +
+		"0x10:  46 6F 72 54 65 73 74       ForTest"
+	config.Findings[0].Description = desc
+	body := readDocxParts(t, config)["word/document.xml"]
+
+	// Every line reached the document.
+	for _, line := range strings.Split(desc, "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(body, xmlEscape(line)) {
+			t.Errorf("the description lost the line %q", line)
+		}
+	}
+
+	// And no paragraph carries the description with line breaks inside it.
+	for _, p := range childElems(body, "w:p") {
+		para := body[p.Start:p.End]
+		if !strings.Contains(para, "affected by MongoBleed") {
+			continue
+		}
+		if n := strings.Count(para, "<w:br/>"); n > 0 {
+			t.Errorf("the description is one paragraph with %d line breaks; each line has to be "+
+				"its own paragraph or Word justifies all but the last of them", n)
+		}
+		if text := elemText(para); strings.Contains(text, "0x00:") {
+			t.Errorf("the whole description is still a single paragraph: %d characters", len(text))
+		}
+	}
+}

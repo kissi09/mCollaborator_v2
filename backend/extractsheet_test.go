@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -483,4 +484,89 @@ func TestExtractsTheRealMUNITExport(t *testing.T) {
 		}
 	}
 	t.Logf("sample: %d findings, notes: %v", len(findings), notes)
+}
+
+// TestReflowUndoesTheScannersHardWrap. MUNIT wraps its prose at about eighty
+// columns for a terminal; the report prints it in a cell several inches wide,
+// where those breaks make a narrow ragged column instead of a paragraph.
+func TestReflowUndoesTheScannersHardWrap(t *testing.T) {
+	in := strings.Join([]string{
+		"The instance of MongoDB running on the remote host is affected by MongoBleed, an unauthenticated unintialized heap",
+		"memory leak vulnerability:",
+		"",
+		"  - Mismatched length fields in Zlib compressed protocol headers may allow a read of uninitialized heap memory by an",
+		"    unauthenticated client. (CVE-2025-14847)",
+		"",
+		"",
+		"A remote, unauthenticated attacker can exploit this issue, via a specially crafted request, to leak potentially",
+		"sensitive server memory.",
+		"MUNIT was able to exploit an uninitialized heap memory leak vulnerability by",
+		"sending crafted requests and received the following leaked memory from the",
+		"server:",
+		"",
+		"0x00:  33 44 38 33 42 35 31 65 70 68 65 6D 65 72 61 6C    3D83B51ephemeral",
+		"0x10:  46 6F 72 54 65 73 74                               ForTest         ",
+		"",
+		"OS                                   : Ubuntu Linux 16.04",
+		"Security End of Life                 : April 30, 2021",
+		"",
+	}, "\n")
+
+	got := strings.Split(reflowScannerText(in), "\n")
+	want := []string{
+		"The instance of MongoDB running on the remote host is affected by MongoBleed, an unauthenticated unintialized heap memory leak vulnerability:",
+		"",
+		"  - Mismatched length fields in Zlib compressed protocol headers may allow a read of uninitialized heap memory by an unauthenticated client. (CVE-2025-14847)",
+		"",
+		"A remote, unauthenticated attacker can exploit this issue, via a specially crafted request, to leak potentially sensitive server memory. MUNIT was able to exploit an uninitialized heap memory leak vulnerability by sending crafted requests and received the following leaked memory from the server:",
+		"",
+		"0x00:  33 44 38 33 42 35 31 65 70 68 65 6D 65 72 61 6C    3D83B51ephemeral",
+		"0x10:  46 6F 72 54 65 73 74                               ForTest",
+		"",
+		"OS                                   : Ubuntu Linux 16.04",
+		"Security End of Life                 : April 30, 2021",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("reflow produced %d lines, want %d", len(got), len(want))
+		for i := 0; i < max(len(got), len(want)); i++ {
+			g, w := "", ""
+			if i < len(got) {
+				g = got[i]
+			}
+			if i < len(want) {
+				w = want[i]
+			}
+			if g != w {
+				t.Errorf("line %d:\n got %q\nwant %q", i, g, w)
+			}
+		}
+	}
+}
+
+// TestReflowKeepsASentencesDoubleSpace. A scanner's prose puts two spaces after
+// a full stop, so "columns held apart by spaces" has to mean three or more -
+// at two, every second line of prose was mistaken for a table and left wrapped.
+func TestReflowKeepsASentencesDoubleSpace(t *testing.T) {
+	in := "The SSH server is configured to support Cipher Block Chaining (CBC)\n" +
+		"encryption.  This may allow an attacker to recover the plaintext message\n" +
+		"from the ciphertext."
+	want := "The SSH server is configured to support Cipher Block Chaining (CBC) " +
+		"encryption.  This may allow an attacker to recover the plaintext message from the ciphertext."
+	if got := reflowScannerText(in); got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+// TestReflowLeavesASingleParagraphAlone. Most descriptions are one line and
+// must come through untouched.
+func TestReflowLeavesASingleParagraphAlone(t *testing.T) {
+	for _, s := range []string{
+		"Unsigned SMB accepted on the domain controllers.",
+		"",
+		"   ",
+	} {
+		if got := reflowScannerText(s); got != strings.TrimSpace(s) {
+			t.Errorf("reflow(%q) = %q", s, got)
+		}
+	}
 }

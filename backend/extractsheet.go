@@ -166,10 +166,13 @@ func ExtractFromSheet(rows [][]string, areaCode string) ([]ExtractedFinding, []s
 		// fill what it left blank. Rows of one vulnerability differ in the host
 		// they were found on, and where they differ in anything else it is
 		// because one of them was filled in and the others were not.
-		fillEmpty(&f.Description, cell("description"))
-		fillEmpty(&f.Impact, cell("impact"))
-		fillEmpty(&f.Remediation, cell("remediation"))
-		fillEmpty(&f.POC, cell("poc"))
+		// The prose fields are unwrapped on the way in rather than on the way
+		// out, so what a tester reads on the review board and edits in the
+		// finding is what the report prints.
+		fillEmpty(&f.Description, reflowScannerText(cell("description")))
+		fillEmpty(&f.Impact, reflowScannerText(cell("impact")))
+		fillEmpty(&f.Remediation, reflowScannerText(cell("remediation")))
+		fillEmpty(&f.POC, reflowScannerText(cell("poc")))
 		fillEmpty(&f.CVE, cell("cve"))
 		if f.Severity == "" {
 			f.Severity = normalizeSeverity(cell("severity"))
@@ -211,6 +214,108 @@ func fillEmpty(dst *string, v string) {
 	if *dst == "" && strings.TrimSpace(v) != "" {
 		*dst = strings.TrimSpace(v)
 	}
+}
+
+var (
+	// A hex dump row: "0x10:  46 6F 72 54 65 73 74   ForTest".
+	scannerHexRe = regexp.MustCompile(`^\s*0x[0-9A-Fa-f]+\s*:`)
+	// Columns held apart by spaces: "OS       : Ubuntu Linux 16.04". Three,
+	// not two, because a scanner's prose puts two spaces after a full stop.
+	scannerColumnRe = regexp.MustCompile(`\S {3,}\S`)
+	// A list item, which owns its line.
+	scannerBulletRe = regexp.MustCompile(`^\s*([-*\x{2022}]|\d+[.)])\s`)
+)
+
+// isFlowLine reports whether a line is part of a paragraph that was wrapped to
+// fit a terminal, as against a line that means to be a line.
+func isFlowLine(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	if s != strings.TrimLeft(s, " \t") {
+		return false // indented: a continuation, a code block, a list body
+	}
+	return !scannerHexRe.MatchString(s) &&
+		!scannerColumnRe.MatchString(s) &&
+		!scannerBulletRe.MatchString(s)
+}
+
+// reflowScannerText undoes the fixed-column wrapping a scanner writes.
+//
+// MUNIT hard-wraps its prose at about eighty characters, which is right for a
+// terminal and wrong for a report: the description lands in a cell several
+// inches wide and prints as a narrow column of short lines with a ragged edge,
+// nothing like the prose around it. The wrap is not the author's - there is no
+// meaning in where those breaks fall - so consecutive prose lines are joined
+// back into one paragraph and left to wrap to the width they are given.
+//
+// What is not rejoined is everything that meant to be a line: hex dumps,
+// aligned label/value pairs, list items and anything indented. Those carry
+// their shape in their whitespace, and flowing them together destroys it.
+// Blank lines stay as the paragraph breaks they are.
+func reflowScannerText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+
+	var out, para []string
+	bullet := "" // the list item being built, "" when none is open
+
+	flushPara := func() {
+		if len(para) > 0 {
+			out = append(out, strings.Join(para, " "))
+			para = nil
+		}
+	}
+	flushBullet := func() {
+		if bullet != "" {
+			out = append(out, bullet)
+			bullet = ""
+		}
+	}
+	flush := func() { flushPara(); flushBullet() }
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimRight(line, " \t")
+		indented := line != strings.TrimLeft(line, " \t")
+		switch {
+		case strings.TrimSpace(line) == "":
+			flush()
+			// One blank line between paragraphs, however many the export
+			// wrote; a run of them is spacing, not structure.
+			if len(out) > 0 && out[len(out)-1] != "" {
+				out = append(out, "")
+			}
+
+		case scannerBulletRe.MatchString(line):
+			flush()
+			bullet = line
+
+		// A list item wrapped onto the next line is indented under its own
+		// marker. Left as a line of its own it reads as a fragment - "by an"
+		// sitting alone between the item and its own ending - so it is folded
+		// back into the item it belongs to. Only under an open list item:
+		// indented text elsewhere is a block that means its shape.
+		case bullet != "" && indented && isFlowLine(strings.TrimLeft(line, " \t")):
+			bullet += " " + strings.TrimSpace(line)
+
+		case isFlowLine(line):
+			// Prose back at the margin ends any open list item, but goes on
+			// building the paragraph it is part of.
+			flushBullet()
+			para = append(para, strings.TrimSpace(line))
+
+		default:
+			flush()
+			out = append(out, line)
+		}
+	}
+	flush()
+
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return strings.Join(out, "\n")
 }
 
 var (

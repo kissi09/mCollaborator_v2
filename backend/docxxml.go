@@ -522,13 +522,43 @@ func withRunBoldOff(rPr string) string {
 
 // setParaTextUnbolded rebuilds a paragraph so it reads exactly text, not bold,
 // keeping every other run property the template gave it.
+//
+// Text that already carries line breaks becomes one paragraph per line rather
+// than one paragraph with Word line breaks inside it.
+//
+// The template's Normal style is justified, and Word justifies every line of a
+// justified paragraph except its last. A scanner's description arrives
+// hard-wrapped at about eighty columns, so writing it as a single paragraph
+// with a break at each wrap made every one of those lines a line that is "not
+// last" - and Word stretched each across the full width of the cell. A 26,000
+// character MongoDB description came out as 350 such lines, reading
+//
+//	memory              leak              vulnerability:
+//
+// A paragraph per line fixes it without overriding the template's alignment:
+// each line becomes its own last line, and a last line is never stretched.
+// Prose long enough to wrap still wraps and still justifies, which is what the
+// template asks for. The cells set spacing-after to zero, so the lines sit as
+// tightly together as the line breaks had them and nothing else moves.
 func setParaTextUnbolded(para, text string) string {
 	gt := strings.Index(para, ">")
 	if gt < 0 {
 		return para
 	}
-	return para[:gt+1] + paraPPr(para) +
-		runsForText(withRunBoldOff(paraFirstRPr(para)), text) + `</w:p>`
+	open := para[:gt+1]
+	pPr := paraPPr(para)
+	rPr := withRunBoldOff(paraFirstRPr(para))
+
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if len(lines) < 2 {
+		return open + pPr + runsForText(rPr, text) + `</w:p>`
+	}
+
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString(open + pPr + runsForText(rPr, line) + `</w:p>`)
+	}
+	return b.String()
 }
 
 // setFirstEmptyParaTextUnbolded is setFirstEmptyParaText with bold switched off
