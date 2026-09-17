@@ -300,12 +300,125 @@ func (d *closureDeck) fillFixedSlides(config ReportConfig) {
 // the issues table
 // ---------------------------------------------------------------------------
 
+// The issues table's own geometry, read off the template. A row is measured
+// against these to work out whether it still fits the slide it is on.
+const (
+	// The frame the template gives the table, and the header row inside it.
+	// What is left is all the room the findings have.
+	issuesFrameHeightEMU  = 4937760
+	issuesHeaderHeightEMU = 365760
+	issuesBodyHeightEMU   = issuesFrameHeightEMU - issuesHeaderHeightEMU
+
+	// The template's own body row. No row is drawn shorter than this: four of
+	// them fill the frame exactly, which is the layout the deck was designed
+	// around, and a table of half-height rows reads as a different table.
+	issuesRowHeightEMU = 1143000
+
+	// The two columns that carry prose. Severity holds one word and never
+	// decides a row's height.
+	issuesIssueColEMU = 6387998
+	issuesRecColEMU   = 3011485
+
+	// marT + marB, the cell padding PowerPoint applies when the template sets
+	// none - which this one does not.
+	issuesCellPaddingEMU = 91440
+
+	// The size the body actually renders at. Read off a generated deck, not off
+	// the template's markup: the cells carry sz="1800" in their list-style
+	// definitions, which is what a search of the XML turns up first, while the
+	// runs the deck is built from are all 1600. Measuring at 18pt made every
+	// row an eighth taller than it prints and left slides two rows short.
+	issuesBodySizeHundredths = 1600
+
+	// How many characters of that face go on one line of each column, counted
+	// off a slide PowerPoint rendered. The wide column takes 64 and the narrow
+	// one 26 - not proportional, because a narrow column loses more of each
+	// line to the word it cannot break. estimateHeight's own width factor is
+	// one number for both, calibrated on the summary callouts, and it reads the
+	// wide column a fifth short; a few characters are held back from each of
+	// these instead, so the estimate stays on the pessimistic side without
+	// being pessimistic by a whole row.
+	issuesIssueCharsPerLine = 60
+	issuesRecCharsPerLine   = 24
+
+	// Leading, and the gap a paragraph leaves after it, as fractions of the
+	// type size. The same 1.2 and 0.3 estimateHeight uses.
+	issuesLeading   = 1.2
+	issuesParaSpace = 0.3
+)
+
+// issueCellHeight is how tall a cell's paragraphs are, in points.
+func issueCellHeight(paras []string, charsPerLine int) float64 {
+	pt := float64(issuesBodySizeHundredths) / 100
+	rows := 0
+	written := 0
+	for _, p := range paras {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		written++
+		n := (len([]rune(p)) + charsPerLine - 1) / charsPerLine
+		if n < 1 {
+			n = 1
+		}
+		rows += n
+	}
+	if rows == 0 {
+		return 0
+	}
+	return float64(rows)*pt*issuesLeading + float64(written-1)*pt*issuesParaSpace
+}
+
+// issueRowHeight is how tall a finding's row will render, in EMU.
+//
+// The two prose columns are measured separately and the taller wins, because
+// that is what decides the row: a one-line issue beside a seven-line
+// recommendation is a seven-line row. No row is ever shorter than the one the
+// template drew.
+func issueRowHeight(f numberedFinding) int {
+	issue := issueCellHeight([]string{
+		strings.TrimSpace(f.Title) + ":",
+		firstSentence(f.Description),
+		hostLine(f),
+	}, issuesIssueCharsPerLine)
+	rec := issueCellHeight([]string{recommendationText(f)}, issuesRecCharsPerLine)
+
+	tallest := issue
+	if rec > tallest {
+		tallest = rec
+	}
+	h := int(tallest*emuPerPoint) + issuesCellPaddingEMU
+	if h < issuesRowHeightEMU {
+		h = issuesRowHeightEMU
+	}
+	return h
+}
+
+// hostLine is the finding's host as the cell prints it, label and all, or ""
+// where there is no host to print.
+func hostLine(f numberedFinding) string {
+	host := strings.TrimSpace(f.AffectedSystem)
+	if host == "" {
+		return ""
+	}
+	return "Affected Host: " + host
+}
+
 // chunkFindings splits the findings into slide-sized groups.
 //
-// The split follows area first and severity second, then fills up to size, so a
-// slide is titled "IPT Issues - Critical Level" rather than "IPT/WPT Issues -
-// Critical/Medium/High Level". Grouping purely by count produces titles that
-// name everything and say nothing, and wrap onto two lines doing it.
+// The split follows area first and severity second, so a slide is titled "IPT
+// Issues - Critical Level" rather than "IPT/WPT Issues - Critical/Medium/High
+// Level". Grouping purely by count produces titles that name everything and say
+// nothing, and wrap onto two lines doing it.
+//
+// Within a group the rows are packed by height, not by count. Four to a slide
+// was the rule, and it held only while findings were short: a report whose
+// recommendations run to a paragraph gave rows two and a half inches tall, so
+// the third and fourth ran off the bottom of the slide with the text still
+// going after the grid lines had stopped. size stays as the ceiling - the
+// template has four body rows and no more - but a slide now ends when the frame
+// is full, and the findings that did not fit start the next one.
 func chunkFindings(findings []numberedFinding, size int) [][]numberedFinding {
 	type key struct{ area, severity string }
 	var order []key
@@ -320,13 +433,22 @@ func chunkFindings(findings []numberedFinding, size int) [][]numberedFinding {
 
 	var out [][]numberedFinding
 	for _, k := range order {
-		group := buckets[k]
-		for i := 0; i < len(group); i += size {
-			end := i + size
-			if end > len(group) {
-				end = len(group)
+		var slide []numberedFinding
+		used := 0
+		for _, f := range buckets[k] {
+			h := issueRowHeight(f)
+			// A single finding taller than the whole frame still gets a slide
+			// of its own: there is nowhere else to put it, and the alternative
+			// is dropping it.
+			if len(slide) > 0 && (len(slide) >= size || used+h > issuesBodyHeightEMU) {
+				out = append(out, slide)
+				slide, used = nil, 0
 			}
-			out = append(out, group[i:end])
+			slide = append(slide, f)
+			used += h
+		}
+		if len(slide) > 0 {
+			out = append(out, slide)
 		}
 	}
 	return out
@@ -364,6 +486,11 @@ func renderIssuesSlide(slide string, group []numberedFinding, index, total int) 
 		prev = span[1]
 	}
 	b.WriteString(tbl[prev:])
+	// The rows keep the height the template gave them, which PowerPoint treats
+	// as a minimum and grows to fit the text. Writing the measured height in
+	// instead padded every row out to the estimate and left visible bands of
+	// empty cell under the short ones. How many rows a slide carries is what
+	// chunkFindings decides; how tall each one draws is PowerPoint's business.
 	return slide[:tblStart] + b.String() + slide[tblEnd:]
 }
 

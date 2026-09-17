@@ -652,3 +652,233 @@ func TestInformationalFitsTheSeverityColumn(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// issues tables that fit the slide
+// ---------------------------------------------------------------------------
+
+// wordyConfig is the shape that broke the tables: a scan-fed engagement whose
+// recommendations run to a paragraph each. The findings are the ones from the
+// deck the reader photographed - an SSH hardening run where a single
+// recommendation lists five cipher suites and then tells you to restart the
+// service.
+func wordyConfig(t *testing.T) ReportConfig {
+	t.Helper()
+	config := closureConfig(t)
+	config.CompanyName = "Profin Ghana Limited"
+	config.CompanyInitials = "PGL"
+	config.Areas = []ReportArea{{Code: "IPT", Scope: "192.168.1.0/24"}}
+	config.Findings = []ReportFinding{
+		{Title: "SSH Server CBC Mode Ciphers Enabled", Severity: "low", Area: "IPT",
+			Description:    "The SSH server is configured to support Cipher Block Chaining (CBC) encryption.",
+			AffectedSystem: "192.168.1.253 (22)",
+			Recommendation: "For Linux system Edit /etc/ssh/sshd_config to include the following; " +
+				"Ciphers aes256-gcm,aes128-gcm,aes256-ctr,aes192-ctr,aes128-ctr Restart the SSH service " +
+				"with systemctl restart sshd so the change takes effect."},
+		{Title: "SSH Weak MAC Algorithms Enabled", Severity: "low", Area: "IPT",
+			Description:    "The remote SSH server is configured to allow either MD5 or 96-bit MAC algorithms, both of which are considered weak.",
+			AffectedSystem: "192.168.1.253 (22)",
+			Recommendation: "Edit the SSH server configuration file /etc/ssh/sshd_config. Remove or disable weak " +
+				"MAC algorithms such as hmac-md5, hmac-md5-96, hmac-sha1-96, and umac-64 Use strong ones instead."},
+		{Title: "SSL/TLS Diffie-Hellman Modulus <= 1024 Bits (Logjam)", Severity: "low", Area: "IPT",
+			Description:    "The remote host supports SSL/TLS connections that use Diffie-Hellman (DH) key exchange with a weak modulus size.",
+			AffectedSystem: "192.168.1.253 (443)",
+			Recommendation: "Ensure that EXPORT ciphers (which use 512-bit RSA keys) are disabled. These ciphers " +
+				"expose the service to the FREAK attack and should not be offered at all."},
+		{Title: "SSL Certificate Signed Using Weak Hashing Algorithm", Severity: "low", Area: "IPT",
+			Description:    "The remote service uses an SSL certificate chain that has been signed using a cryptographically weak hashing algorithm.",
+			AffectedSystem: "192.168.1.253 (443)",
+			Recommendation: "Contact the Certificate Authority to have the certificate reissued, signed with SHA-256 " +
+				"or better, and replace the certificate on the host."},
+	}
+	return config
+}
+
+// issuesSlideFindings returns, for every issues slide in deck order, the
+// finding titles its table carries.
+func issuesSlideFindings(t *testing.T, parts map[string]string) [][]string {
+	t.Helper()
+	var out [][]string
+	for _, name := range slideNamesInOrder(parts) {
+		body := parts[name]
+		if !strings.Contains(body, ">Issues<") {
+			continue
+		}
+		start := strings.Index(body, "<a:tbl>")
+		end := strings.Index(body, "</a:tbl>")
+		if start < 0 || end < 0 {
+			continue
+		}
+		tbl := body[start:end]
+		rows := childElems(tbl, "a:tr")
+		var titles []string
+		// Row 0 is the header.
+		for _, r := range rows[1:] {
+			row := tbl[r.Start:r.End]
+			cells := childElems(row, "a:tc")
+			if len(cells) == 0 {
+				continue
+			}
+			// The cell's text comes back escaped, and a title can carry a
+			// "<=" as readily as a colon.
+			text := xmlUnescape(aParaText(row[cells[0].Start:cells[0].End]))
+			if i := strings.Index(text, ":"); i > 0 {
+				text = text[:i]
+			}
+			titles = append(titles, strings.TrimSpace(text))
+		}
+		out = append(out, titles)
+	}
+	return out
+}
+
+// The regression the reader photographed: four findings to a slide held only
+// while the findings were short. With a paragraph of recommendation each, the
+// rows grew to two and a half inches and the third and fourth ran off the
+// bottom of the slide - the grid lines stopped and the text kept going.
+//
+// PowerPoint grows a row to fit its text and will not move one to the next
+// slide, so the only thing that keeps a table on its slide is how many findings
+// were put on it.
+func TestIssuesTableStaysOnTheSlide(t *testing.T) {
+	config := wordyConfig(t)
+	deck, _, err := buildClosureDeck(config)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	slides := issuesSlideFindings(t, deckParts(t, deck))
+	if len(slides) < 2 {
+		t.Fatalf("findings this wordy came out on %d slide(s); they do not fit on one", len(slides))
+	}
+
+	byTitle := map[string]numberedFinding{}
+	for _, f := range buildNumberedFindings(config) {
+		byTitle[strings.TrimSpace(f.Title)] = f
+	}
+	for i, titles := range slides {
+		if len(titles) == 0 {
+			t.Errorf("issues slide %d has no finding rows", i+1)
+			continue
+		}
+		used := 0
+		for _, title := range titles {
+			f, ok := byTitle[title]
+			if !ok {
+				t.Errorf("issues slide %d shows %q, which is in no finding", i+1, title)
+				continue
+			}
+			used += issueRowHeight(f)
+		}
+		// One finding taller than the frame gets a slide to itself; there is
+		// nowhere else to put it.
+		if len(titles) > 1 && used > issuesBodyHeightEMU {
+			t.Errorf("issues slide %d carries %d EMU of rows in the %d EMU the table has - it overflows",
+				i+1, used, issuesBodyHeightEMU)
+		}
+	}
+}
+
+// The findings are all still there, and each appears once: a split that drops
+// or repeats one is worse than the overflow it fixed.
+func TestIssuesSplitKeepsEveryFinding(t *testing.T) {
+	config := wordyConfig(t)
+	deck, _, err := buildClosureDeck(config)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	text := allSlideText(deckParts(t, deck))
+	for _, f := range config.Findings {
+		if n := strings.Count(text, xmlEscape(f.Title)+":"); n != 1 {
+			t.Errorf("%q appears in %d issues cells, want exactly 1", f.Title, n)
+		}
+	}
+}
+
+// Short findings still get four to a slide. The fix is a ceiling on height, not
+// a new ceiling on count: a deck of one-line findings must not suddenly need
+// twice the slides.
+func TestShortFindingsStillFillASlide(t *testing.T) {
+	config := closureConfig(t)
+	config.Areas = []ReportArea{{Code: "IPT", Scope: "10.0.0.0/24"}}
+	config.Findings = nil
+	for i := range 4 {
+		config.Findings = append(config.Findings, ReportFinding{
+			Title: fmt.Sprintf("Weak cipher suite %d", i+1), Severity: "low", Area: "IPT",
+			Description: "TLS 1.0 is offered.", AffectedSystem: "10.0.0.5",
+			Recommendation: "Disable it.",
+		})
+	}
+
+	deck, _, err := buildClosureDeck(config)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	slides := issuesSlideFindings(t, deckParts(t, deck))
+	if len(slides) != 1 {
+		t.Fatalf("four one-line findings came out on %d slides, want 1", len(slides))
+	}
+	if len(slides[0]) != 4 {
+		t.Errorf("the slide holds %d findings, want all 4", len(slides[0]))
+	}
+}
+
+// A row is measured by whichever of its two prose columns is taller. The
+// recommendation column is less than half the width of the issues column, so a
+// one-line finding with a long recommendation is a tall row - which is exactly
+// the case the old rule mismeasured.
+func TestRowHeightFollowsTheTallerColumn(t *testing.T) {
+	short := numberedFinding{ReportFinding: ReportFinding{
+		Title: "Verbose banner", Description: "Version disclosed.", AffectedSystem: "10.0.0.5",
+		Recommendation: "Suppress it."}}
+	wordy := numberedFinding{ReportFinding: ReportFinding{
+		Title: "Verbose banner", Description: "Version disclosed.", AffectedSystem: "10.0.0.5",
+		Recommendation: "Edit the SSH server configuration file /etc/ssh/sshd_config. Remove or disable " +
+			"weak MAC algorithms such as hmac-md5, hmac-md5-96, hmac-sha1-96, and umac-64."}}
+
+	if h := issueRowHeight(short); h != issuesRowHeightEMU {
+		t.Errorf("a short finding measures %d EMU, want the template's own %d", h, issuesRowHeightEMU)
+	}
+	if issueRowHeight(wordy) <= issueRowHeight(short) {
+		t.Error("a paragraph of recommendation measures no taller than a two-word one")
+	}
+	if h := issueRowHeight(wordy); h > issuesBodyHeightEMU {
+		t.Errorf("one finding measures %d EMU, taller than the %d the slide has - "+
+			"nothing would ever share a slide with it", h, issuesBodyHeightEMU)
+	}
+}
+
+// The measurement is only worth anything if it errs the safe way against what
+// PowerPoint actually draws. These are the numbers read off a rendered slide:
+// the issues column takes 64 characters of the deck's 16pt body face to the
+// line, and the recommendation column 26.
+//
+// The estimate may be pessimistic - it is, by about a fifth on the wide column,
+// which costs a little room on a slide. It may never be optimistic: a row the
+// estimate calls one line and the slide draws as two is how the tables came to
+// overflow in the first place.
+func TestRowMeasurementIsNeverOptimistic(t *testing.T) {
+	const lineHeightPt = 16 * 1.2
+
+	cases := []struct {
+		name      string
+		estimated int // what the measurement allows on a line
+		drawn     int // what the rendered slide actually fits
+	}{
+		{"issues column", issuesIssueCharsPerLine, 64},
+		{"recommendation column", issuesRecCharsPerLine, 26},
+	}
+	for _, c := range cases {
+		if c.estimated > c.drawn {
+			t.Errorf("%s: the measurement puts %d characters on a line the slide draws %d on",
+				c.name, c.estimated, c.drawn)
+		}
+		for _, lines := range []int{1, 2, 5} {
+			text := strings.Repeat("x", c.drawn*lines)
+			got := issueCellHeight([]string{text}, c.estimated)
+			if want := float64(lines) * lineHeightPt; got < want {
+				t.Errorf("%s: %d characters measure %.1fpt, but the slide draws them over %d lines (%.1fpt)",
+					c.name, len(text), got, lines, want)
+			}
+		}
+	}
+}
