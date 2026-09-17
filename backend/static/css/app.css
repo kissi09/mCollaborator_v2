@@ -938,3 +938,45 @@ input, textarea, select, button { font-family: inherit; }
   background: var(--surface); color: var(--text); font-size: 12px; line-height: 1;
 }
 .closure-shot-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+
+/* A proof carries where it came from: a file picked off disk, or a record the
+   deck will resolve out of the evidence vault. Knowing which matters - the
+   vault's copy is the same picture the report printed. */
+.closure-shot-tag {
+  position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 52px);
+  padding: 2px 7px; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 10px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.closure-vault-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+  max-height: 420px; overflow-y: auto;
+}
+.closure-vault-item {
+  position: relative; display: block; width: 100%; padding: 8px; cursor: pointer; text-align: left;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); font: inherit;
+}
+.closure-vault-item:hover { border-color: var(--primary); }
+.closure-vault-item.is-on { border-color: #22C55E; background: color-mix(in srgb, #22C55E 8%, transparent); }
+.closure-vault-thumb {
+  display: flex; align-items: center; justify-content: center;
+  height: 110px; margin-bottom: 8px; overflow: hidden;
+  background: var(--surface); border-radius: var(--radius);
+}
+.closure-vault-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.closure-vault-loading { min-height: 1px; }
+.closure-vault-gone { font-family: var(--font-mono); font-size: 10.5px; color: var(--warning); }
+.closure-vault-name {
+  font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.closure-vault-meta {
+  font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.closure-vault-on {
+  position: absolute; top: 6px; right: 6px; padding: 2px 7px; border-radius: var(--radius);
+  background: #22C55E; color: #06210F; font-family: var(--font-mono); font-size: 9.5px; font-weight: 700;
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -167,6 +168,35 @@ func TestClosureImportAttachesUploadedScreenshots(t *testing.T) {
 	}
 }
 
+// A finding can carry both kinds of proof: a record picked out of the evidence
+// vault and a file uploaded on the preview screen. The vault's images come
+// first, because resolvePOCImages has already put them there by the time the
+// uploads are attached - and the preview screen orders its scenario slides on
+// exactly that assumption.
+func TestClosureImportKeepsVaultProofsBeforeUploads(t *testing.T) {
+	cfg := ReportConfig{
+		CompanyName: "Acme Test Corp",
+		Areas:       []ReportArea{{Code: "WPT"}},
+		Findings: []ReportFinding{{
+			Title: "Reflected XSS", Severity: "high", Area: "WPT", Description: "q is echoed.",
+			// What resolvePOCImages leaves behind for an attached evidence record.
+			POCImages:  []POCImage{{Data: pngBytes(t), Filename: "from-the-vault.png"}},
+			POCUploads: []UploadedPOCImage{{Filename: "uploaded.png", Data: base64PNG(t)}},
+		}},
+	}
+
+	if bad := attachUploadedPOCImages(&cfg); len(bad) != 0 {
+		t.Fatalf("uploads were rejected: %v", bad)
+	}
+	got := cfg.Findings[0].POCImages
+	if len(got) != 2 {
+		t.Fatalf("the finding has %d proofs, want both", len(got))
+	}
+	if got[0].Filename != "from-the-vault.png" || got[1].Filename != "uploaded.png" {
+		t.Errorf("proof order = %q then %q, want the vault's record first", got[0].Filename, got[1].Filename)
+	}
+}
+
 // A report that never went through this app - headings the extractor has to
 // guess at, no naming convention list - still yields what the title slide
 // needs, and says what it could not find rather than inventing it.
@@ -293,4 +323,14 @@ func TestClosureImportReadsAPDFScopeTable(t *testing.T) {
 func base64PNG(t *testing.T) string {
 	t.Helper()
 	return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+}
+
+// pngBytes is the same image decoded, as an evidence record would hold it.
+func pngBytes(t *testing.T) []byte {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(base64PNG(t))
+	if err != nil {
+		t.Fatalf("decode the test PNG: %v", err)
+	}
+	return raw
 }

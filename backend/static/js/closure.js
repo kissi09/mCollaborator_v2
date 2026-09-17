@@ -11,9 +11,10 @@
 //   - The screenshots. A proof in a report is a picture anchored in a table
 //     cell with nothing tying it to the finding beside it, and in a PDF it is
 //     not a file at all. Every scenario slide here therefore has an empty
-//     picture frame until someone drops the image into it, taken from the
-//     report's own evidence section. A finding whose frame stays empty gets no
-//     scenario slide, exactly as it would from the wizard.
+//     picture frame until the proof is put into it: uploaded from the report's
+//     own evidence section, or picked out of the Evidence vault where the
+//     engagement's screenshots are already held. A finding whose frame stays
+//     empty gets no scenario slide, exactly as it would from the wizard.
 //   - Whatever the reader got wrong. A report written by hand puts its labels
 //     in places the extractor has to work out, and an area it could not settle
 //     is left blank rather than guessed at. Everything read is editable, and the
@@ -95,7 +96,8 @@ function prepareClosureDraft() {
   cfg.areas = cfg.areas || [];
   cfg.findings = (cfg.findings || []).map((f, i) => Object.assign({}, f, {
     _id: i + 1,
-    poc_uploads: f.poc_uploads || []
+    poc_uploads: f.poc_uploads || [],
+    poc_evidence_ids: f.poc_evidence_ids || []
   }));
 }
 
@@ -103,6 +105,10 @@ function discardClosureDraft() {
   if (!confirm('Discard this report and everything corrected on this screen?')) return;
   closureDraft = null;
   closureDeckResult = null;
+  // The thumbnails were object URLs; nothing else is holding them open.
+  closureVaultUrls.forEach(url => URL.revokeObjectURL(url));
+  closureVaultUrls.clear();
+  closureVault = null;
   MCOLLABORATOR.navigate('#/closure-prep');
 }
 
@@ -248,8 +254,8 @@ function paintClosurePreview() {
   const cfg = closureDraft.config;
   const unplaced = cfg.findings.filter(f => !(f.area || '').trim());
   const numbered = closureNumbered();
-  const shots = numbered.reduce((n, f) => n + (f.poc_uploads || []).length, 0);
-  const proven = numbered.filter(f => (f.poc_uploads || []).length).length;
+  const shots = numbered.reduce((n, f) => n + closureProofs(f).length, 0);
+  const proven = numbered.filter(f => closureProofs(f).length).length;
 
   if (head) {
     head.innerHTML = `
@@ -287,6 +293,10 @@ function paintClosurePreview() {
     closureIssueSlidesHtml(numbered),
     closureScenarioSlidesHtml(numbered)
   ].join('');
+
+  // The vault's thumbnails are fetched with the session token rather than
+  // loaded from their src, so they are painted in after the markup is up.
+  body.querySelectorAll('img[data-evidence]').forEach(img => loadClosureVaultImg(img.dataset.evidence));
 }
 
 // closureNoticesHtml is everything the reader has to settle before the deck is
@@ -342,8 +352,9 @@ function closureNoticesHtml(unplaced, shots, without) {
       <p class="text-sm text-muted" style="line-height:1.7;">
         Every finding appears in the issues tables whether or not it has a proof. A scenario slide is built
         only where a screenshot is attached &mdash; drop each one into the empty frame on its own slide below,
-        taken from the report's evidence section. A finding with several proofs runs onto
-        &ldquo;(Cont'd)&rdquo; slides, the way the reference deck does it.
+        taken from the report's evidence section, or pick it out of the Evidence vault where it is already in
+        the app. A finding with several proofs runs onto &ldquo;(Cont'd)&rdquo; slides, the way the reference
+        deck does it.
       </p>
     </div>`;
 
@@ -548,28 +559,33 @@ function closureIssueRowHtml(f) {
     </div>`;
 }
 
-// One scenario slide per screenshot, and one empty frame per finding that has
-// none — an empty frame is a slide that will not be in the deck, and saying so
-// on the slide itself is clearer than a list of names at the top.
+// closureProofs is a finding's proofs in the order the deck will use them: the
+// evidence vault's records first, because resolvePOCImages runs before the
+// uploads are attached, then the files picked off disk here.
+function closureProofs(f) {
+  return (f.poc_evidence_ids || []).map(id => ({ kind: 'evidence', id: id }))
+    .concat((f.poc_uploads || []).map((shot, i) => ({ kind: 'upload', shot: shot, index: i })));
+}
+
+// One scenario slide per proof, and one empty frame per finding that has none —
+// an empty frame is a slide that will not be in the deck, and saying so on the
+// slide itself is clearer than a list of names at the top.
 function closureScenarioSlidesHtml(numbered) {
   if (!numbered.length) return '';
   return numbered.map(f => {
-    const shots = f.poc_uploads || [];
-    if (!shots.length) {
-      return closureSlideHtml('Scenario — no proof yet', closureScenarioBody(f, 1, null, 0), 'is-empty');
+    const proofs = closureProofs(f);
+    if (!proofs.length) {
+      return closureSlideHtml('Scenario — no proof yet', closureScenarioBody(f, 1, null), 'is-empty');
     }
-    return shots.map((shot, i) =>
-      closureSlideHtml(`Scenario — ${f._vulnId}`, closureScenarioBody(f, i + 1, shot, i))).join('');
+    return proofs.map((proof, i) =>
+      closureSlideHtml(`Scenario — ${f._vulnId}`, closureScenarioBody(f, i + 1, proof))).join('');
   }).join('');
 }
 
-function closureScenarioBody(f, part, shot, index) {
+function closureScenarioBody(f, part, proof) {
   const result = (f.impact || '').trim() || closureFirstSentence(f.description);
-  const frame = shot ? `
-    <div class="closure-shot">
-      <img src="${shot.data.startsWith('data:') ? shot.data : `data:${shot.mime_type || 'image/png'};base64,${shot.data}`}" alt="">
-      <button class="closure-shot-remove" onclick="removeClosureShot(${f._id}, ${index})" title="Remove this screenshot">&#10005;</button>
-    </div>` : `
+  const count = closureProofs(f).length;
+  const frame = proof ? closureProofFrameHtml(f, proof) : `
     <div class="closure-frame" onclick="document.getElementById('closure-shot-${f._id}').click()">
       <div style="font-size:26px;">&#128247;</div>
       <div class="font-semibold" style="font-size:13px;">Drop the screenshot here</div>
@@ -593,14 +609,232 @@ function closureScenarioBody(f, part, shot, index) {
     </div>
     <div class="closure-shot-actions">
       <button class="btn btn-secondary btn-sm" onclick="document.getElementById('closure-shot-${f._id}').click()">
-        ${shot ? '&#10133; Add another proof' : '&#11014; Upload the proof'}
+        ${count ? '&#10133; Add another file' : '&#11014; Upload the proof'}
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="openClosureVault(${f._id})">
+        &#128193; Choose from the Evidence vault
       </button>
       <span class="text-xs text-muted">
-        ${(f.poc_uploads || []).length} attached &middot; each extra one becomes a &ldquo;(Cont'd)&rdquo; slide
+        ${count} attached &middot; each extra one becomes a &ldquo;(Cont'd)&rdquo; slide
       </span>
       <input type="file" id="closure-shot-${f._id}" accept=".png,.jpg,.jpeg,.gif" multiple style="display:none;"
         onchange="addClosureShots(${f._id}, this.files)">
     </div>`;
+}
+
+// closureProofFrameHtml draws one attached proof.
+//
+// A vault record is shown through closureVaultImg rather than an <img src> at
+// its endpoint: the evidence file route is behind the session token, and a plain
+// src attribute carries no Authorization header, so the picture would be a
+// broken image every time.
+function closureProofFrameHtml(f, proof) {
+  if (proof.kind === 'upload') {
+    const src = proof.shot.data.startsWith('data:')
+      ? proof.shot.data
+      : `data:${proof.shot.mime_type || 'image/png'};base64,${proof.shot.data}`;
+    return `
+      <div class="closure-shot">
+        <img src="${src}" alt="">
+        <button class="closure-shot-remove" onclick="removeClosureShot(${f._id}, ${proof.index})"
+          title="Remove this screenshot">&#10005;</button>
+        <span class="closure-shot-tag">${sanitizeInput(proof.shot.filename || 'uploaded')}</span>
+      </div>`;
+  }
+  const ev = closureVaultById(proof.id);
+  return `
+    <div class="closure-shot">
+      ${closureVaultImg(proof.id)}
+      <button class="closure-shot-remove" onclick="removeClosureEvidence(${f._id}, '${proof.id}')"
+        title="Detach this evidence record">&#10005;</button>
+      <span class="closure-shot-tag">Evidence vault &middot; ${sanitizeInput(ev ? ev.filename : proof.id)}</span>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// the evidence vault picker
+//
+// A screenshot for a finding is often already in the app - it was uploaded to
+// the vault during the engagement, and it is the same picture the report
+// printed. Picking it here attaches the record rather than a copy of the file:
+// the deck then resolves it through resolvePOCImages, exactly as the wizard's
+// own decks do, and the deck, the report and the vault cannot end up showing
+// three different pictures of one vulnerability.
+// ---------------------------------------------------------------------------
+
+// closureVault is the vault's image records, loaded once per visit to this
+// screen. closureVaultUrls holds the object URL each thumbnail is drawn from.
+let closureVault = null;
+let closureVaultError = '';
+let closureVaultFor = null;
+const closureVaultUrls = new Map();
+
+function closureVaultById(id) {
+  return (closureVault || []).find(ev => ev.id === id) || null;
+}
+
+async function openClosureVault(findingId) {
+  closureVaultFor = findingId;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'closure-vault-overlay';
+  overlay.innerHTML = '<div class="modal" style="width:760px;" id="closure-vault-modal"></div>';
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeClosureVault(); });
+  document.body.appendChild(overlay);
+  paintClosureVault();
+
+  if (closureVault === null) {
+    await loadClosureVault();
+    paintClosureVault();
+  }
+}
+
+function closeClosureVault() {
+  const el = document.getElementById('closure-vault-overlay');
+  if (el) el.remove();
+  closureVaultFor = null;
+}
+
+// loadClosureVault reads the vault once. Only images are offered: a PDF or a
+// packet capture is evidence, but it is not something a slide can show.
+async function loadClosureVault() {
+  closureVaultError = '';
+  try {
+    const res = await api.get('/evidence');
+    const all = res.data || [];
+    closureVault = all
+      .filter(ev => (ev.mime_type || '').toLowerCase().startsWith('image/'))
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+
+    // The engagement each one came from, so two screenshots with the same name
+    // can be told apart.
+    try {
+      const engs = await api.get('/engagements');
+      const names = {};
+      (engs.data || []).forEach(e => { names[e.id] = e.name || e.client_name || ''; });
+      closureVault.forEach(ev => { ev._engagement = names[ev.engagement_id] || ''; });
+    } catch (e) {
+      // A name is a nicety; the picker works without it.
+    }
+  } catch (e) {
+    closureVault = [];
+    closureVaultError = e.message || 'The evidence vault could not be read.';
+  }
+}
+
+function paintClosureVault() {
+  const host = document.getElementById('closure-vault-modal');
+  if (!host) return;
+  const f = closureFindingById(closureVaultFor);
+
+  let body;
+  if (closureVault === null) {
+    body = '<div class="closure-empty">Reading the evidence vault&hellip;</div>';
+  } else if (closureVaultError) {
+    body = `<div class="import-error">${sanitizeInput(closureVaultError)}</div>`;
+  } else if (!closureVault.length) {
+    body = `
+      <div class="closure-empty">
+        <div style="font-size:28px;margin-bottom:6px;">&#128193;</div>
+        <div class="font-semibold mb-1">No images in the evidence vault</div>
+        <div class="text-xs">Upload the screenshot from the report instead, or add it to the vault first.</div>
+      </div>`;
+  } else {
+    const taken = new Set(f ? (f.poc_evidence_ids || []) : []);
+    body = `<div class="closure-vault-grid">${closureVault.map(ev => {
+      const on = taken.has(ev.id);
+      return `
+        <button class="closure-vault-item${on ? ' is-on' : ''}"
+          ${on ? `onclick="removeClosureEvidence(${f._id}, '${ev.id}')"` : `onclick="pickClosureEvidence(${f._id}, '${ev.id}')"`}>
+          <div class="closure-vault-thumb">${closureVaultImg(ev.id)}</div>
+          <div class="closure-vault-name">${sanitizeInput(ev.filename || ev.id)}</div>
+          <div class="closure-vault-meta">
+            ${sanitizeInput(ev._engagement || ev.engagement_id || '')}
+            ${ev.tags ? ' &middot; ' + sanitizeInput(ev.tags) : ''}
+          </div>
+          ${on ? '<span class="closure-vault-on">Attached</span>' : ''}
+        </button>`;
+    }).join('')}</div>`;
+  }
+
+  host.innerHTML = `
+    <div class="modal-header">
+      <h3>Evidence vault</h3>
+      <button class="btn btn-ghost text-sm" onclick="closeClosureVault()">&#10005;</button>
+    </div>
+    <div class="modal-body">
+      <p class="text-sm text-muted mb-3" style="line-height:1.7;">
+        Pick the proof for <strong>${sanitizeInput(f ? f.title : '')}</strong>. The deck uses the vault's own
+        file, so the slide shows the same picture the report does. Pick more than one and each becomes a
+        &ldquo;(Cont'd)&rdquo; slide.
+      </p>
+      ${body}
+    </div>
+    <div class="modal-footer" style="justify-content:space-between;">
+      <span class="text-xs text-muted">Only images are listed &mdash; a slide cannot show a capture file.</span>
+      <button class="btn btn-primary" onclick="closeClosureVault()">Done</button>
+    </div>`;
+
+  closureVaultUrls.forEach((url, id) => paintClosureVaultImg(id, url));
+  document.querySelectorAll('img[data-evidence]').forEach(img => loadClosureVaultImg(img.dataset.evidence));
+}
+
+// closureVaultImg is the placeholder a thumbnail is painted into once its bytes
+// have been fetched with the session token.
+function closureVaultImg(id) {
+  const url = closureVaultUrls.get(id);
+  return url
+    ? `<img src="${url}" alt="" data-evidence-loaded="${id}">`
+    : `<img alt="" data-evidence="${id}" class="closure-vault-loading">`;
+}
+
+async function loadClosureVaultImg(id) {
+  if (closureVaultUrls.has(id)) {
+    paintClosureVaultImg(id, closureVaultUrls.get(id));
+    return;
+  }
+  try {
+    const base = await api.uploadBase();
+    const headers = {};
+    if (MCOLLABORATOR.token) headers['Authorization'] = `Bearer ${MCOLLABORATOR.token}`;
+    const res = await fetch(`${base}/evidence/${id}/file`, { headers });
+    if (!res.ok) throw new Error('not readable');
+    const url = URL.createObjectURL(await res.blob());
+    closureVaultUrls.set(id, url);
+    paintClosureVaultImg(id, url);
+  } catch (e) {
+    document.querySelectorAll(`img[data-evidence="${id}"]`).forEach(img => {
+      img.replaceWith(Object.assign(document.createElement('span'), {
+        className: 'closure-vault-gone', textContent: 'file missing'
+      }));
+    });
+  }
+}
+
+function paintClosureVaultImg(id, url) {
+  document.querySelectorAll(`img[data-evidence="${id}"]`).forEach(img => {
+    img.src = url;
+    img.classList.remove('closure-vault-loading');
+    img.removeAttribute('data-evidence');
+    img.setAttribute('data-evidence-loaded', id);
+  });
+}
+
+function pickClosureEvidence(findingId, evidenceId) {
+  const f = closureFindingById(findingId);
+  if (!f) return;
+  f.poc_evidence_ids = f.poc_evidence_ids || [];
+  if (!f.poc_evidence_ids.includes(evidenceId)) f.poc_evidence_ids.push(evidenceId);
+  paintClosurePreview();
+  paintClosureVault();
+}
+
+function removeClosureEvidence(findingId, evidenceId) {
+  const f = closureFindingById(findingId);
+  if (!f) return;
+  f.poc_evidence_ids = (f.poc_evidence_ids || []).filter(id => id !== evidenceId);
+  paintClosurePreview();
+  paintClosureVault();
 }
 
 // ---------------------------------------------------------------------------
