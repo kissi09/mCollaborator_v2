@@ -286,6 +286,151 @@ async function openGeneratedReport(kind) {
   window.open(url, '_blank');
 }
 
+// ---------------------------------------------------------------------------
+// Showing a file out of the evidence vault
+//
+// /api/v1/evidence/{id}/file is behind the session token. authMiddleware reads
+// the Authorization header and nothing else - no cookie, no query token - so a
+// plain <img src> pointed at it is answered 401 and draws a broken image.
+//
+// Every thumbnail in the app used to do exactly that, and every one carried an
+// onerror that quietly put a document glyph in its place. So the vault, the
+// finding detail and the editor's PoC strip all looked like they simply had no
+// previews, rather than like they were failing, and nothing said why.
+//
+// The bytes are fetched with the header instead and handed to the page as a
+// blob URL. Markup asks for a picture through evidenceImg, and
+// hydrateEvidenceImages fills in every placeholder under a root once the markup
+// is on screen.
+// ---------------------------------------------------------------------------
+
+// One object URL per evidence id, held for as long as the app is open: a
+// thumbnail is redrawn many times in a session and the file behind it does not
+// change.
+const evidenceBlobUrls = new Map();
+
+// jsAttr quotes a value for a single-quoted JS string inside a double-quoted
+// HTML attribute - onclick="f('...')". Both layers have to be escaped: a
+// filename with an apostrophe would close the JS string, and one with a double
+// quote would close the attribute. JSON.stringify only does the first, which is
+// why a screenshot called "day 2.png" opened nothing at all.
+function jsAttr(value) {
+  return String(value == null ? '' : value)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// evidenceImg is the placeholder to put in markup. It carries the id rather
+// than a src, because a src is the thing that cannot work.
+function evidenceImg(id, style, alt) {
+  return `<img data-evidence-file="${id}" alt="${sanitizeInput(alt || '')}" style="${style || ''}">`;
+}
+
+// evidenceFileUrl fetches one evidence file and returns a URL the page can use.
+async function evidenceFileUrl(id) {
+  if (evidenceBlobUrls.has(id)) return evidenceBlobUrls.get(id);
+  const headers = {};
+  if (MCOLLABORATOR.token) headers['Authorization'] = `Bearer ${MCOLLABORATOR.token}`;
+  // The absolute loopback base, for the same reason uploads use it: inside the
+  // desktop window a request to the app's own origin is rebuilt by the shell on
+  // its way through, and only the direct one is left alone.
+  const base = await api.uploadBase();
+  const res = await fetch(`${base}/evidence/${id}/file`, { headers });
+  if (!res.ok) throw new Error(`the server answered ${res.status}`);
+  const url = URL.createObjectURL(await res.blob());
+  evidenceBlobUrls.set(id, url);
+  return url;
+}
+
+// hydrateEvidenceImages fills in every evidence picture under root.
+//
+// It takes two kinds: the placeholders evidenceImg writes, and any <img> still
+// pointing straight at the endpoint. The second kind is not markup this app
+// builds any more - it is stored data. addPocEvidence writes an <img> tag into
+// the finding's own PoC text, so every finding written since it did carries
+// one. Rewriting them as they are rendered shows those proofs without touching
+// what is saved, which the report renderer strips out and re-attaches as real
+// Word drawings.
+async function hydrateEvidenceImages(root) {
+  const scope = root || document;
+  const targets = [];
+  scope.querySelectorAll('img[data-evidence-file]').forEach(img => {
+    targets.push([img, img.dataset.evidenceFile]);
+  });
+  scope.querySelectorAll('img[src*="/evidence/"]').forEach(img => {
+    const m = /\/evidence\/([^/]+)\/file/.exec(img.getAttribute('src') || '');
+    if (m) targets.push([img, m[1]]);
+  });
+
+  await Promise.all(targets.map(async ([img, id]) => {
+    try {
+      img.src = await evidenceFileUrl(id);
+      img.removeAttribute('data-evidence-file');
+    } catch (e) {
+      // A file genuinely gone from disk, or a session that has expired. Either
+      // way the glyph keeps the row's shape, and its title says which it was
+      // rather than leaving the reader to guess.
+      const glyph = document.createElement('span');
+      glyph.className = 'evidence-missing';
+      glyph.title = `This file could not be read: ${e.message}`;
+      glyph.textContent = '📄';
+      glyph.setAttribute('style', img.getAttribute('style') || '');
+      img.replaceWith(glyph);
+    }
+  }));
+}
+
+// openEvidenceFile shows the file, out of the bytes already fetched.
+//
+// Not window.open on the endpoint, which is answered 401, and not
+// target="_blank", which the desktop window swallows without opening anything.
+// An image is shown in the app; anything else is handed over as a download.
+async function openEvidenceFile(id, filename) {
+  let url;
+  try {
+    url = await evidenceFileUrl(id);
+  } catch (e) {
+    showToast(`That evidence file could not be opened: ${e.message}`, 'error');
+    return;
+  }
+  const name = filename || 'evidence';
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)) {
+    showEvidenceViewer(url, name);
+    return;
+  }
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+// showEvidenceViewer puts the full-size picture over the page. A 36-pixel
+// thumbnail is not enough to tell two screenshots of the same console apart.
+function showEvidenceViewer(url, name) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay evidence-viewer';
+  overlay.innerHTML = `
+    <div class="evidence-viewer-inner">
+      <div class="evidence-viewer-bar">
+        <span class="font-mono text-sm truncate">${sanitizeInput(name)}</span>
+        <button class="btn btn-ghost text-sm" aria-label="Close">&#10005;</button>
+      </div>
+      <img src="${url}" alt="${sanitizeInput(name)}">
+    </div>`;
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('button').addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+}
+
 // generateClosureDeck posts the wizard's engagement to the closure endpoint and
 // shows the result, including which findings will have no scenario slide.
 // closureResultHtml renders one /reports/closure response. Split out for the
@@ -1417,10 +1562,10 @@ async function afterRenderEvidenceVault() {
       return;
     }
     rows.innerHTML = items.map(ev => `
-      <div class="flex items-center px-4 py-3 border-b" style="cursor:pointer;" onclick="window.open('/api/v1/evidence/${ev.id}/file','_blank')" onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background=''">
+      <div class="flex items-center px-4 py-3 border-b" style="cursor:pointer;" onclick="openEvidenceFile('${ev.id}', '${jsAttr(ev.filename)}')" onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background=''">
         <div style="flex:2;display:flex;align-items:center;gap:8px;">
           ${ev.mime_type?.includes('image')
-            ? `<img src="/api/v1/evidence/${ev.id}/file" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.outerHTML='<span style=font-size:18px;>📄</span>'">`
+            ? evidenceImg(ev.id, 'width:36px;height:36px;object-fit:cover;border-radius:4px;', ev.filename)
             : `<span style="font-size:18px;">${ev.mime_type?.includes('pcap') ? '📡' : '📄'}</span>`}
           <span class="font-mono" style="font-size:13px;">${ev.filename}</span>
           ${ev.finding_id ? `<span class="status-pill in_progress" style="font-size:9px;">attached</span>` : ''}
@@ -1430,6 +1575,7 @@ async function afterRenderEvidenceVault() {
         <div style="flex:0 0 80px;text-align:right;font-size:12px;font-family:var(--font-mono);">${formatBytes(ev.size_bytes)}</div>
       </div>
     `).join('');
+    hydrateEvidenceImages(rows);
   } catch (e) {
     document.getElementById('evidence-rows').innerHTML = '<div class="p-4 text-sm text-muted">Failed to load.</div>';
   }
@@ -2334,6 +2480,10 @@ async function showFindingDetail(findingId) {
     const pocDiv = document.getElementById('poc-content');
     if (pocDiv && f.poc) {
       pocDiv.innerHTML = f.poc;
+      // The PoC text carries <img> tags aimed straight at the evidence
+      // endpoint, written into it by addPocEvidence. They need the same
+      // treatment as any other evidence picture.
+      hydrateEvidenceImages(pocDiv);
     }
     // Render attached evidence thumbnails
     const evWrap = document.getElementById('finding-detail-evidence');
@@ -2344,15 +2494,17 @@ async function showFindingDetail(findingId) {
         const shown = evs.filter(Boolean);
         evWrap.innerHTML = shown.length
           ? shown.map(ev => `
-              <a href="/api/v1/evidence/${ev.id}/file" target="_blank" style="display:block;width:120px;text-align:center;text-decoration:none;" title="${ev.filename}">
+              <button type="button" onclick="openEvidenceFile('${ev.id}', '${jsAttr(ev.filename)}')"
+                class="evidence-tile" title="${sanitizeInput(ev.filename || '')}">
                 <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;height:90px;background:var(--bg);">
                   ${ev.mime_type?.includes('image')
-                    ? `<img src="/api/v1/evidence/${ev.id}/file" style="width:100%;height:100%;object-fit:cover;" onerror="this.outerHTML='<div style=padding:30px 0;>📄</div>'">`
+                    ? evidenceImg(ev.id, 'width:100%;height:100%;object-fit:cover;', ev.filename)
                     : `<div style="padding:30px 0;font-size:24px;">📄</div>`}
                 </div>
-                <div class="text-xs text-muted truncate" style="margin-top:4px;">${ev.filename}</div>
-              </a>`).join('')
+                <div class="text-xs text-muted truncate" style="margin-top:4px;">${sanitizeInput(ev.filename || '')}</div>
+              </button>`).join('')
           : '';
+        hydrateEvidenceImages(evWrap);
       });
     }
   } catch (e) {
@@ -3462,10 +3614,11 @@ function renderPocEvidenceList() {
   }
   wrap.innerHTML = ids.map(id => `
     <div style="position:relative;border:1px solid var(--border);border-radius:6px;overflow:hidden;width:72px;height:72px;">
-      <img src="/api/v1/evidence/${id}/file" alt="PoC" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">
+      ${evidenceImg(id, 'width:100%;height:100%;object-fit:cover;', 'PoC screenshot')}
       <button type="button" onclick="removePocEvidence('${id}')" title="Remove" style="position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;line-height:1;cursor:pointer;">✕</button>
     </div>
   `).join('');
+  hydrateEvidenceImages(wrap);
 }
 
 // Modal picker: choose an existing evidence record from the current engagement
@@ -3507,13 +3660,16 @@ async function loadEvidencePicker(engId) {
     container.innerHTML = items.map(ev => `
       <label class="flex items-center gap-3 p-3" style="cursor:pointer;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;${ev.mime_type?.includes('image') ? '' : 'opacity:0.55;'}" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
         <input type="radio" name="poc-evidence-pick" value="${ev.id}" style="accent-color:var(--primary);" onchange="pickPocEvidence('${ev.id}','${ev.filename.replace(/'/g, "\\'")}')">
-        ${ev.mime_type?.includes('image') ? `<img src="/api/v1/evidence/${ev.id}/file" style="width:56px;height:56px;object-fit:cover;border-radius:6px;" onerror="this.style.visibility='hidden'">` : '<span style="font-size:22px;">📄</span>'}
+        ${ev.mime_type?.includes('image')
+          ? evidenceImg(ev.id, 'width:56px;height:56px;object-fit:cover;border-radius:6px;', ev.filename)
+          : '<span style="font-size:22px;">📄</span>'}
         <div class="flex-1">
           <div class="font-semibold text-sm">${ev.filename}</div>
           <div class="text-xs text-muted font-mono">${formatBytes(ev.size_bytes)} · ${timeAgo(ev.created_at)}</div>
         </div>
       </label>
     `).join('');
+    hydrateEvidenceImages(container);
   } catch (e) {
     container.innerHTML = '<div class="p-4 text-sm text-muted">Failed to load evidence.</div>';
   }

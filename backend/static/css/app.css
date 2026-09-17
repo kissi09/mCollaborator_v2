@@ -980,3 +980,36 @@ input, textarea, select, button { font-family: inherit; }
   position: absolute; top: 6px; right: 6px; padding: 2px 7px; border-radius: var(--radius);
   background: #22C55E; color: #06210F; font-family: var(--font-mono); font-size: 9.5px; font-weight: 700;
 }
+
+/* ============ EVIDENCE PICTURES ============ */
+/* A file that could not be read keeps the shape of the picture it replaces, so
+   a row does not reflow around it. Its title says what went wrong. */
+.evidence-missing {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 18px; color: var(--muted); cursor: help;
+}
+
+/* The finding detail's attached evidence. A button rather than a link, because
+   the file is fetched with the session token and shown in the app - a plain
+   href at the endpoint is answered 401, and target="_blank" is swallowed by the
+   desktop window. */
+.evidence-tile {
+  display: block; width: 120px; padding: 0; text-align: center; cursor: pointer;
+  background: none; border: none; color: inherit; font: inherit;
+}
+.evidence-tile:hover div:first-child { border-color: var(--primary); }
+
+.evidence-viewer { padding: 32px; }
+.evidence-viewer-inner {
+  display: flex; flex-direction: column; max-width: 92vw; max-height: 88vh;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden;
+}
+.evidence-viewer-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.evidence-viewer-inner img {
+  display: block; max-width: 100%; max-height: calc(88vh - 48px);
+  object-fit: contain; background: var(--bg);
+}

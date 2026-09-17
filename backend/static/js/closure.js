@@ -105,9 +105,6 @@ function discardClosureDraft() {
   if (!confirm('Discard this report and everything corrected on this screen?')) return;
   closureDraft = null;
   closureDeckResult = null;
-  // The thumbnails were object URLs; nothing else is holding them open.
-  closureVaultUrls.forEach(url => URL.revokeObjectURL(url));
-  closureVaultUrls.clear();
   closureVault = null;
   MCOLLABORATOR.navigate('#/closure-prep');
 }
@@ -294,9 +291,9 @@ function paintClosurePreview() {
     closureScenarioSlidesHtml(numbered)
   ].join('');
 
-  // The vault's thumbnails are fetched with the session token rather than
-  // loaded from their src, so they are painted in after the markup is up.
-  body.querySelectorAll('img[data-evidence]').forEach(img => loadClosureVaultImg(img.dataset.evidence));
+  // A vault picture is fetched with the session token rather than loaded from
+  // its src, so it is painted in once the markup is up.
+  hydrateEvidenceImages(body);
 }
 
 // closureNoticesHtml is everything the reader has to settle before the deck is
@@ -624,10 +621,10 @@ function closureScenarioBody(f, part, proof) {
 
 // closureProofFrameHtml draws one attached proof.
 //
-// A vault record is shown through closureVaultImg rather than an <img src> at
-// its endpoint: the evidence file route is behind the session token, and a plain
-// src attribute carries no Authorization header, so the picture would be a
-// broken image every time.
+// A vault record is shown through evidenceImg rather than an <img src> at its
+// endpoint: the evidence file route is behind the session token, and a plain src
+// attribute carries no Authorization header, so the picture would be a broken
+// image every time. hydrateEvidenceImages fills it in once the markup is up.
 function closureProofFrameHtml(f, proof) {
   if (proof.kind === 'upload') {
     const src = proof.shot.data.startsWith('data:')
@@ -644,7 +641,7 @@ function closureProofFrameHtml(f, proof) {
   const ev = closureVaultById(proof.id);
   return `
     <div class="closure-shot">
-      ${closureVaultImg(proof.id)}
+      ${evidenceImg(proof.id, '', ev ? ev.filename : 'evidence')}
       <button class="closure-shot-remove" onclick="removeClosureEvidence(${f._id}, '${proof.id}')"
         title="Detach this evidence record">&#10005;</button>
       <span class="closure-shot-tag">Evidence vault &middot; ${sanitizeInput(ev ? ev.filename : proof.id)}</span>
@@ -663,11 +660,12 @@ function closureProofFrameHtml(f, proof) {
 // ---------------------------------------------------------------------------
 
 // closureVault is the vault's image records, loaded once per visit to this
-// screen. closureVaultUrls holds the object URL each thumbnail is drawn from.
+// screen. The pictures themselves come from evidenceImg and
+// hydrateEvidenceImages, the app's own way of showing a file that sits behind
+// the session token.
 let closureVault = null;
 let closureVaultError = '';
 let closureVaultFor = null;
-const closureVaultUrls = new Map();
 
 function closureVaultById(id) {
   return (closureVault || []).find(ev => ev.id === id) || null;
@@ -746,7 +744,7 @@ function paintClosureVault() {
       return `
         <button class="closure-vault-item${on ? ' is-on' : ''}"
           ${on ? `onclick="removeClosureEvidence(${f._id}, '${ev.id}')"` : `onclick="pickClosureEvidence(${f._id}, '${ev.id}')"`}>
-          <div class="closure-vault-thumb">${closureVaultImg(ev.id)}</div>
+          <div class="closure-vault-thumb">${evidenceImg(ev.id, '', ev.filename)}</div>
           <div class="closure-vault-name">${sanitizeInput(ev.filename || ev.id)}</div>
           <div class="closure-vault-meta">
             ${sanitizeInput(ev._engagement || ev.engagement_id || '')}
@@ -775,49 +773,7 @@ function paintClosureVault() {
       <button class="btn btn-primary" onclick="closeClosureVault()">Done</button>
     </div>`;
 
-  closureVaultUrls.forEach((url, id) => paintClosureVaultImg(id, url));
-  document.querySelectorAll('img[data-evidence]').forEach(img => loadClosureVaultImg(img.dataset.evidence));
-}
-
-// closureVaultImg is the placeholder a thumbnail is painted into once its bytes
-// have been fetched with the session token.
-function closureVaultImg(id) {
-  const url = closureVaultUrls.get(id);
-  return url
-    ? `<img src="${url}" alt="" data-evidence-loaded="${id}">`
-    : `<img alt="" data-evidence="${id}" class="closure-vault-loading">`;
-}
-
-async function loadClosureVaultImg(id) {
-  if (closureVaultUrls.has(id)) {
-    paintClosureVaultImg(id, closureVaultUrls.get(id));
-    return;
-  }
-  try {
-    const base = await api.uploadBase();
-    const headers = {};
-    if (MCOLLABORATOR.token) headers['Authorization'] = `Bearer ${MCOLLABORATOR.token}`;
-    const res = await fetch(`${base}/evidence/${id}/file`, { headers });
-    if (!res.ok) throw new Error('not readable');
-    const url = URL.createObjectURL(await res.blob());
-    closureVaultUrls.set(id, url);
-    paintClosureVaultImg(id, url);
-  } catch (e) {
-    document.querySelectorAll(`img[data-evidence="${id}"]`).forEach(img => {
-      img.replaceWith(Object.assign(document.createElement('span'), {
-        className: 'closure-vault-gone', textContent: 'file missing'
-      }));
-    });
-  }
-}
-
-function paintClosureVaultImg(id, url) {
-  document.querySelectorAll(`img[data-evidence="${id}"]`).forEach(img => {
-    img.src = url;
-    img.classList.remove('closure-vault-loading');
-    img.removeAttribute('data-evidence');
-    img.setAttribute('data-evidence-loaded', id);
-  });
+  hydrateEvidenceImages(host);
 }
 
 function pickClosureEvidence(findingId, evidenceId) {
