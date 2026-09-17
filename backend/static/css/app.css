@@ -798,3 +798,143 @@ input, textarea, select, button { font-family: inherit; }
 .severity-dot.high { background: var(--warning); }
 .severity-dot.medium { background: #3B82F6; }
 .severity-dot.low { background: #22C55E; }
+
+/* ============ CLOSURE PREP: DECK PREVIEW ============ */
+/* Two ways into a closing deck, side by side: the wizard's engagement, and a
+   finished report read back off disk. */
+.closure-sources { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .closure-sources { grid-template-columns: 1fr; } }
+.closure-sources .dropzone { padding: 26px 20px; }
+
+/* The preview itself: the slides the deck will be made of, in deck order, each
+   card shaped like the slide it becomes. */
+.closure-preview {
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--topbar-height));
+  overflow: hidden;
+}
+.closure-slides { flex: 1; overflow-y: auto; padding: 20px 24px 64px; min-height: 0; }
+.closure-notices { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+.closure-notice {
+  padding: 14px 16px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface); font-size: 13px;
+}
+.closure-notice.warn {
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+}
+.closure-notice.ok {
+  border-color: color-mix(in srgb, #22C55E 35%, transparent);
+  background: color-mix(in srgb, #22C55E 7%, transparent);
+}
+.closure-pen-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; font-size: 13px; }
+
+.closure-slide { margin: 0 auto 22px; max-width: 980px; }
+.closure-slide-tab {
+  display: flex; align-items: center; gap: 10px; padding: 0 2px 6px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted);
+}
+.closure-slide-tab .num {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 20px; padding: 0 6px; border-radius: var(--radius);
+  background: var(--surface-hover); color: var(--text);
+}
+/* 16:9, the shape of the slide - but only as a floor. A slide carrying more
+   than the template's own does grows rather than hiding the rest of it. */
+.closure-canvas {
+  min-height: 0; aspect-ratio: 16 / 9; height: auto;
+  padding: 26px 30px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.closure-slide.is-empty .closure-canvas {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+}
+.closure-slide-title {
+  font-family: var(--font-display); font-weight: 700; font-size: 17px;
+  color: var(--text); margin-bottom: 14px;
+}
+.closure-empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
+.closure-missing { color: var(--warning); }
+.closure-hint { margin-top: 14px; font-size: 11.5px; line-height: 1.7; color: var(--muted); }
+
+/* Fields drawn as the slide's own text rather than as form controls: what is on
+   screen is what prints. */
+.closure-edit {
+  width: 100%; padding: 6px 8px; font: inherit; font-size: 13px; color: var(--text);
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius);
+  resize: vertical;
+}
+.closure-edit:hover { border-color: var(--border); }
+.closure-edit:focus { outline: none; border-color: var(--primary); background: var(--bg); }
+.closure-edit-strong { font-weight: 700; }
+.closure-edit-title { font-family: var(--font-display); font-size: 26px; font-weight: 700; }
+.closure-edit-inline { width: auto; padding: 2px 6px; font-size: 11px; }
+.closure-edit-sev { font-weight: 700; text-align: center; }
+.closure-edit-area { font-size: 12.5px; }
+
+.closure-title-slide { display: flex; flex-direction: column; justify-content: center; height: 100%; gap: 6px; }
+.closure-logo {
+  width: 120px; height: 56px; margin-bottom: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px dashed var(--border); border-radius: var(--radius); overflow: hidden;
+}
+.closure-logo:hover { border-color: var(--primary); }
+.closure-logo-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.closure-title-sub { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+.closure-title-meta { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 10px; }
+.closure-title-meta label {
+  flex: 1; min-width: 200px; font-family: var(--font-mono); font-size: 10.5px;
+  font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted);
+}
+
+.closure-scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.closure-scope-cell { padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+.closure-scope-head { font-size: 12.5px; font-weight: 700; margin-bottom: 4px; }
+.closure-bullets { margin: 16px 0 0 18px; font-size: 12.5px; line-height: 1.8; color: var(--text-muted); }
+
+.closure-callouts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.closure-callout { padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+.closure-callout-code { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--primary); margin-bottom: 6px; }
+.closure-callout-line { font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+.closure-callout-more { margin-top: 4px; font-size: 11px; color: var(--muted); }
+
+.closure-issues { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.closure-issues-head, .closure-issue-row { display: grid; grid-template-columns: 1fr 120px 1fr; }
+.closure-issues-head {
+  background: var(--surface-hover); padding: 8px 10px; gap: 10px;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted);
+}
+.closure-issue-row { gap: 10px; padding: 10px; border-top: 1px solid var(--border); align-items: start; }
+.closure-affected { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.closure-affected span { font-weight: 700; white-space: nowrap; }
+.closure-row-foot {
+  display: flex; align-items: center; gap: 10px; margin-top: 6px; padding-left: 8px;
+  font-size: 10.5px; color: var(--muted);
+}
+
+.closure-scenario { display: grid; grid-template-columns: 1fr 1.1fr; gap: 16px; align-items: start; }
+.closure-scenario-rows { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.closure-scenario-rows > div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 8px 10px; font-size: 12.5px; }
+.closure-scenario-rows > div + div { border-top: 1px solid var(--border); }
+.closure-scenario-rows span { font-weight: 700; color: var(--muted); }
+.closure-frame {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-height: 180px; padding: 16px; text-align: center; cursor: pointer;
+  border: 2px dashed var(--muted); border-radius: var(--radius);
+}
+.closure-frame:hover { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, transparent); }
+.closure-shot { position: relative; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+/* The whole screenshot, scaled to the width it has and no taller than it needs.
+   Constraining the height instead - with either max-height or object-fit - cut
+   the bottom off a tall proof, and a preview that hides half the evidence is
+   worse than a card that grows to show it. */
+.closure-shot img { display: block; width: 100%; height: auto; background: var(--bg); }
+.closure-shot-remove {
+  position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); font-size: 12px; line-height: 1;
+}
+.closure-shot-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }

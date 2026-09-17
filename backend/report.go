@@ -104,6 +104,21 @@ type ReportFinding struct {
 	// DOCX/PDF renderers run.
 	POCEvidenceIDs []string   `json:"poc_evidence_ids,omitempty"`
 	POCImages      []POCImage `json:"-"`
+
+	// POCUploads are screenshots sent with the request itself rather than
+	// looked up in the evidence vault. Closure prep's report-upload path has no
+	// evidence records to resolve - the deck is built from a finished document,
+	// not from an engagement held in the app - so each finding's proof is
+	// uploaded on the preview screen and travels with the request.
+	POCUploads []UploadedPOCImage `json:"poc_uploads,omitempty"`
+}
+
+// UploadedPOCImage is one screenshot carried in the request body. Data is what
+// a browser's FileReader produces: base64, with or without the data-URI wrapper.
+type UploadedPOCImage struct {
+	Filename string `json:"filename"`
+	MimeType string `json:"mime_type,omitempty"`
+	Data     string `json:"data"`
 }
 
 // POCImage is a resolved PoC screenshot ready for embedding into a document.
@@ -449,6 +464,11 @@ type closureDeckResponse struct {
 
 	// LogoError explains why the client's logo is not on the title slide.
 	LogoError string `json:"logo_error,omitempty"`
+
+	// ImageErrors names screenshots uploaded with the request that could not be
+	// decoded. The deck is still built - one unreadable file must not cost the
+	// meeting its deck - but the page has to say which proof is not in it.
+	ImageErrors []string `json:"image_errors,omitempty"`
 }
 
 // HandleExportClosureDeck renders the closing-meeting deck for an engagement.
@@ -467,6 +487,7 @@ func HandleExportClosureDeck(store *Store) http.HandlerFunc {
 		}
 		normalizeReportAreas(&config)
 		resolvePOCImages(store, &config)
+		badUploads := attachUploadedPOCImages(&config)
 
 		reportsDir, err := ensureReportsDir()
 		if err != nil {
@@ -494,7 +515,7 @@ func HandleExportClosureDeck(store *Store) http.HandlerFunc {
 		}
 		log.Printf("closure: generated %s (%d bytes)", baseName, len(deck))
 
-		response := closureDeckResponse{PPTXURL: reportDownloadURL("pptx", baseName)}
+		response := closureDeckResponse{PPTXURL: reportDownloadURL("pptx", baseName), ImageErrors: badUploads}
 		if notes != nil {
 			response.FindingsWithoutProof = notes.FindingsWithoutProof
 			response.LogoError = notes.LogoError
@@ -545,4 +566,38 @@ func resolvePOCImages(store *Store, config *ReportConfig) {
 			})
 		}
 	}
+}
+
+// attachUploadedPOCImages decodes the screenshots that came with the request and
+// appends them to the images already resolved from the vault.
+//
+// This is the closure prep upload path: a report read off disk has no evidence
+// records behind it, so the proof for each finding is uploaded on the preview
+// screen instead. It appends rather than replaces, so an engagement that has
+// both - vault evidence and a screenshot added in the preview - keeps both.
+//
+// A file that will not decode is named and skipped. Losing one screenshot is a
+// gap in the deck; failing the request loses the meeting's deck entirely.
+func attachUploadedPOCImages(config *ReportConfig) []string {
+	var bad []string
+	for i := range config.Findings {
+		f := &config.Findings[i]
+		for _, up := range f.POCUploads {
+			name := strings.TrimSpace(up.Filename)
+			if name == "" {
+				name = "screenshot"
+			}
+			raw, err := decodeUploadedBytes(up.Data)
+			if err != nil || len(raw) == 0 {
+				bad = append(bad, fmt.Sprintf("%s: %q could not be read", strings.TrimSpace(f.Title), name))
+				log.Printf("closure: skip uploaded PoC %q for %q: %v", name, f.Title, err)
+				continue
+			}
+			f.POCImages = append(f.POCImages, POCImage{Data: raw, Filename: name, MimeType: up.MimeType})
+		}
+		// The payload is answered for now; carrying the base64 any further only
+		// doubles the memory the deck is built in.
+		f.POCUploads = nil
+	}
+	return bad
 }

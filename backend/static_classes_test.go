@@ -51,6 +51,7 @@ func TestEveryClassInTheMarkupIsStyled(t *testing.T) {
 		filepath.Join(root, "index.html"),
 		filepath.Join(root, "js", "pages.js"),
 		filepath.Join(root, "js", "state.js"),
+		filepath.Join(root, "js", "closure.js"),
 	}
 
 	missing := map[string][]string{}

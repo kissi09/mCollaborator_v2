@@ -103,6 +103,11 @@ func main() {
 		// shared work between the analysts who found the issues and whoever
 		// presents them.
 		r.Post("/reports/closure", HandleExportClosureDeck(store))
+		// Reads a finished report back into a closure draft, so a closing
+		// meeting can be prepared for an engagement that was never in the app.
+		// Saves nothing: the draft is corrected on the preview screen and comes
+		// back to /reports/closure as an ordinary deck request.
+		r.Post("/reports/closure/import", HandleClosureImport())
 		r.Get("/reports/download/{type}/{name}", HandleDownloadReport)
 	})
 

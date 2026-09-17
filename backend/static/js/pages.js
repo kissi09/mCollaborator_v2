@@ -97,21 +97,49 @@ async function handleChangePassword(e) {
 }
 
 // -------- CLOSURE PREP --------
-// Placeholder workspace: project managers get a "work in progress" notice,
-// admins get an empty section. The real closure workflow lands here next.
-// -------- CLOSURE PREP --------
 // The closing meeting is presented from a deck built out of the same findings
-// the report is built from. This page generates it.
+// the report is built from. This page generates it, from either of the two
+// places those findings can be.
 //
-// It reuses the report wizard's state rather than asking for the engagement
-// details a second time: a closing deck that disagreed with the report about the
-// client name, the date or which findings were included would be worse than no
-// deck at all. The page therefore only offers to build once the wizard has been
-// filled in, and says so plainly when it has not.
+// The first is the report wizard, whose state this page reads rather than
+// asking for the engagement details a second time: a closing deck that
+// disagreed with the report about the client name, the date or which findings
+// were included would be worse than no deck at all.
+//
+// The second is a finished report - a DOCX or a PDF on disk, for an engagement
+// that was never in the app or was closed long ago. That one is read back into
+// a draft and corrected on the preview screen before the deck is built.
 function renderClosurePrep() {
   const s = reportWizardState;
   const ready = (s.companyName || '').trim() !== '' && s.findings.length > 0;
   const withProof = s.findings.filter(f => (f.evidence_ids || []).length > 0).length;
+
+  const wizardCard = ready ? `
+    <div class="card p-4">
+      <div class="eyebrow mb-3">From the report wizard</div>
+      <div style="font-size:13px;color:var(--text-muted);">
+        <div class="mb-1"><strong>Company:</strong> ${sanitizeInput(s.companyName || '')}</div>
+        <div class="mb-1"><strong>Reference:</strong> ${sanitizeInput(s.refNumber || '') || 'Not specified'}</div>
+        <div class="mb-1"><strong>Findings:</strong> ${s.findings.length} across ${selectedAreaCodes().length} area(s)</div>
+        <div class="mb-1"><strong>Vulnerability scenarios:</strong> ${withProof} finding(s) have evidence attached</div>
+        <div class="text-xs mt-3">
+          Every finding appears in the issues tables. A finding gets a scenario slide only
+          where a screenshot is attached to it in the Evidence vault &mdash; the deck shows the
+          same image the report does, not a second copy.
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+        <button class="btn btn-primary" onclick="generateClosureDeck()">&#9889; Generate Closing Deck</button>
+      </div>
+    </div>` : `
+    <div class="card p-4">
+      <div class="eyebrow mb-3">From the report wizard</div>
+      <p class="text-sm text-muted mb-4" style="line-height:1.7;">
+        Nothing has been entered in the wizard yet. Fill it in and the deck is built from the
+        same engagement details and findings as the report, so that the two cannot disagree.
+      </p>
+      <a class="btn btn-secondary" href="#/reports" style="text-decoration:none;">Open the report wizard</a>
+    </div>`;
 
   return `
     <div>
@@ -120,46 +148,58 @@ function renderClosurePrep() {
         ${ready ? '<span class="status-pill open">Ready</span>' : ''}
       </div>
 
-      ${!ready ? `
-        <div class="card p-6" style="text-align:center;padding:64px 24px;">
-          <div style="font-size:40px;margin-bottom:12px;">&#128202;</div>
-          <h3 class="font-display font-bold mb-2">Fill in the report wizard first</h3>
-          <p class="text-sm text-muted" style="max-width:520px;margin:0 auto 20px;">
-            The closing deck is built from the same engagement details and findings as the
-            report, so that the two cannot disagree. Complete the wizard, then come back.
-          </p>
-          <a class="btn btn-primary" href="#/reports" style="text-decoration:none;">Open the report wizard</a>
-        </div>`
-      : `
-        <div class="card p-4 mb-4">
-          <h4 class="font-semibold mb-2">What the deck will contain</h4>
-          <div style="font-size:13px;color:var(--text-muted);">
-            <div class="mb-1"><strong>Company:</strong> ${sanitizeInput(s.companyName)}</div>
-            <div class="mb-1"><strong>Reference:</strong> ${sanitizeInput(s.refNumber) || 'Not specified'}</div>
-            <div class="mb-1"><strong>Findings:</strong> ${s.findings.length} across ${selectedAreaCodes().length} area(s)</div>
-            <div class="mb-1"><strong>Vulnerability scenarios:</strong> ${withProof} finding(s) have evidence attached</div>
-            <div class="text-xs mt-3">
-              Every finding appears in the issues tables. A finding gets a scenario slide only
-              where a screenshot is attached to it in the Evidence vault &mdash; the deck shows the
-              same image the report does, not a second copy.
-            </div>
+      <div class="closure-sources mb-4">
+        ${wizardCard}
+
+        <div class="card p-4">
+          <div class="eyebrow mb-3">From a finished report</div>
+          <div class="dropzone" id="closure-dropzone" onclick="document.getElementById('closure-file-input').click()">
+            <div style="font-size:28px;margin-bottom:6px;">&#8593;</div>
+            <p class="font-display font-bold" style="font-size:15px;">Drop a Cyberteq report here</p>
+            <p class="text-sm text-muted">or click to browse &middot; DOCX or PDF, up to ${IMPORT_MAX_MB}&nbsp;MB</p>
+            <input type="file" id="closure-file-input" accept=".docx,.pdf" style="display:none;"
+              onchange="handleClosureImportFile(this.files)">
+          </div>
+          <div id="closure-import-status"></div>
+          <div class="import-note mt-3">
+            The client, the reference, the dates, the areas and every finding are read back out of
+            the document. The <span style="color:var(--text);">screenshots cannot be</span> &mdash; a proof in a
+            report is a picture with nothing tying it to the finding beside it, and in a PDF it is
+            not a file at all. So the next screen previews the slides, takes any corrections, and
+            asks for each finding's proof from the report's evidence section before it builds.
           </div>
         </div>
+      </div>
 
+      ${ready ? `
         <div id="closure-result" style="border:1px solid var(--border);border-radius:var(--radius);padding:32px;background:var(--bg);min-height:160px;">
           ${s.lastClosureResult ? closureResultHtml(s.lastClosureResult) : `
           <div style="text-align:center;color:var(--muted);padding:28px 0;">
             <div style="font-size:32px;margin-bottom:8px;">&#127909;</div>
             <p>Generate the closing meeting deck from this engagement.</p>
           </div>`}
-        </div>
-
-        <div style="display:flex;justify-content:flex-end;margin-top:20px;">
-          <button class="btn btn-primary" onclick="generateClosureDeck()">&#9889; Generate Closing Deck</button>
-        </div>`
-      }
+        </div>` : ''}
     </div>
   `;
+}
+
+// The dropzone accepts a real drop as well as a click, because dropping a
+// report onto the box is what the box looks like it does.
+function afterRenderClosurePrep() {
+  const zone = document.getElementById('closure-dropzone');
+  if (!zone) return;
+  ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => {
+    e.preventDefault();
+    zone.classList.add('is-over');
+  }));
+  ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, e => {
+    e.preventDefault();
+    if (ev === 'dragleave' && zone.contains(e.relatedTarget)) return;
+    zone.classList.remove('is-over');
+  }));
+  zone.addEventListener('drop', e => {
+    if (e.dataTransfer?.files?.length) handleClosureImportFile(e.dataTransfer.files);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3636,6 +3676,12 @@ function afterRender(path) {
       break;
     case path === '/import-review':
       setTimeout(afterRenderExtractionReview, 50);
+      break;
+    case path === '/closure-prep':
+      setTimeout(afterRenderClosurePrep, 50);
+      break;
+    case path === '/closure-preview':
+      setTimeout(afterRenderClosurePreview, 50);
       break;
     case path === '/evidence':
       setTimeout(afterRenderEvidenceVault, 50);

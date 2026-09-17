@@ -76,7 +76,7 @@ func decodeUploadedBytes(payload string) ([]byte, error) {
 
 	raw, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return nil, fmt.Errorf("decode logo base64: %w", err)
+		return nil, fmt.Errorf("decode base64 payload: %w", err)
 	}
 	return raw, nil
 }
